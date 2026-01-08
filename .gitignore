@@ -1,0 +1,50 @@
+--- Python ---
+
+pycache/
+*.py[cod]
+*$py.class
+venv/
+.env
+
+--- Node.js / Frontend ---
+
+node_modules/
+frontend/node_modules/
+frontend/dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+--- Build Artifacts (Сборка) ---
+
+build/
+dist/
+*.spec
+frontend/dist/
+
+
+backend/static/assets/
+backend/static/index.html
+
+--- Project Data ---
+
+data/
+homehub.db
+uploads/
+thumbnails/
+cache/
+storage/
+
+--- System & Update ---
+
+update_stage/
+.update_ready
+*.log
+
+--- IDE & OS ---
+
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
