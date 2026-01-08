@@ -20,9 +20,9 @@ import Settings from '@/components/Settings.vue'
 const authStore = useAuthStore()
 const notify = useNotificationStore()
 
-const status = ref('Подключение...')
+const status = ref('Запуск...')
 const apiInfo = ref(null)
-const isSetupComplete = ref(true)
+const isSetupComplete = ref(false)
 const checkingAuth = ref(true)
 const currentView = ref('library') 
 const activeAlbum = ref(null)
@@ -44,8 +44,8 @@ const prevItem = computed(() => mediaItems.value[currentMediaIndex.value - 1] ||
 const fileInputRef = ref(null)
 let heartbeatInterval = null
 
-// --- HEARTBEAT LOGIC ---
 const startHeartbeat = () => {
+  if (heartbeatInterval) clearInterval(heartbeatInterval)
   heartbeatInterval = setInterval(() => {
     api.sendHeartbeat().catch(() => {
       status.value = 'Офлайн'
@@ -53,21 +53,29 @@ const startHeartbeat = () => {
   }, 3000)
 }
 
-const initSystem = async () => {
+const initSystem = async (retryCount = 0) => {
+  checkingAuth.value = true
+  
   try {
     const health = await api.checkHealth()
-    status.value = 'Онлайн'
     apiInfo.value = health.data
+    status.value = 'Онлайн'
+    
     const authStatus = await api.getAuthStatus()
     isSetupComplete.value = authStatus.data.is_setup
     
     startHeartbeat()
 
     if (isSetupComplete.value) await loadData()
-  } catch (error) {
-    status.value = 'Офлайн'
-  } finally {
     checkingAuth.value = false
+    
+  } catch (error) {
+    if (retryCount < 10) {
+      setTimeout(() => initSystem(retryCount + 1), 500)
+    } else {
+      status.value = 'Офлайн'
+      checkingAuth.value = false
+    }
   }
 }
 
@@ -152,10 +160,27 @@ onUnmounted(() => {
   <div class="h-screen w-full flex p-4 gap-4 overflow-hidden relative selection:bg-hub-accent selection:text-white font-sans">
     <ToastContainer />
     <input type="file" ref="fileInputRef" class="hidden" multiple accept="image/*,video/*,.cr2,.nef,.dng" @change="onFileChange" />
+    
     <CreateAlbumModal :isOpen="isCreateAlbumOpen" @close="isCreateAlbumOpen = false" @create="handleCreateAlbum" />
     <MediaViewer :isOpen="viewerOpen" :item="activeItem" :nextItem="nextItem" :prevItem="prevItem" :hasNext="currentMediaIndex < mediaItems.length - 1" :hasPrev="currentMediaIndex > 0" @close="viewerOpen = false" @next="nextMedia" @prev="prevMedia" />
-    <SetupWizard v-if="!checkingAuth && !isSetupComplete" @setup-complete="onSetupFinished" />
+    
+    <!-- LOADING -->
+    <div v-if="checkingAuth" class="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#111] text-white gap-4">
+        <div class="loader"></div>
+        <div class="text-white/30 text-sm animate-pulse">Запуск HomeHub...</div>
+    </div>
 
+    <!-- ERROR -->
+    <div v-else-if="status === 'Офлайн'" class="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/90 text-white gap-4">
+       <div class="text-2xl font-bold text-red-400">Ошибка запуска</div>
+       <p class="text-white/50">Сервер не отвечает</p>
+       <button @click="initSystem(0)" class="px-6 py-2 bg-blue-600 rounded-lg hover:bg-blue-500 transition-colors">Повторить</button>
+    </div>
+
+    <!-- WIZARD -->
+    <SetupWizard v-else-if="!isSetupComplete" @setup-complete="onSetupFinished" />
+
+    <!-- MAIN UI -->
     <template v-else>
       <div class="w-72 flex flex-col gap-4 shrink-0">
         <div class="h-20 glass-panel rounded-3xl flex items-center px-6 gap-4">
@@ -164,7 +189,7 @@ onUnmounted(() => {
           </div>
           <div>
             <h1 class="font-bold text-xl tracking-tight text-white leading-none">HomeHub</h1>
-            <span class="text-[10px] uppercase font-bold text-white/40 tracking-widest mt-0.5 block">Beta Vault</span>
+            <span class="text-[10px] uppercase font-bold text-white/40 tracking-widest mt-0.5 block">Release 1.0.0</span>
           </div>
         </div>
         <Sidebar :currentView="currentView" @change-view="changeView" class="flex-1 rounded-3xl" />
