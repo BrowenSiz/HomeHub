@@ -25,6 +25,7 @@ def generate_thumbnail(media_item):
     
     try:
         img = None
+        
         if media_item.media_type and media_item.media_type.startswith('video/'):
             try:
                 cap = cv2.VideoCapture(str(source_path))

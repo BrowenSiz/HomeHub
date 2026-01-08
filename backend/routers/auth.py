@@ -34,6 +34,7 @@ def get_auth_status(db: Session = Depends(database.get_db)):
 def get_system_stats(db: Session = Depends(database.get_db)):
     config = db.query(models.SystemConfig).first()
     total_files = db.query(models.Media).count()
+    
     media_items = db.query(models.Media).with_entities(models.Media.file_size).all()
     total_size = sum(item.file_size for item in media_items) if media_items else 0
 
@@ -41,7 +42,7 @@ def get_system_stats(db: Session = Depends(database.get_db)):
         "total_files": total_files,
         "total_size_bytes": total_size,
         "is_setup": bool(config and config.is_setup_complete),
-        "version": "1.0.0 (Beta)"
+        "version": settings.VERSION
     }
 
 @router.post("/setup")

@@ -100,40 +100,64 @@ def bulk_encrypt(ids: List[int], db: Session = Depends(database.get_db)):
     if vault_state.get_key() is None:
         raise HTTPException(status_code=403, detail="Vault locked")
         
+    encrypted_count = 0
     for mid in ids:
         media = db.query(models.Media).filter(models.Media.id == mid).first()
         if media and not media.is_encrypted:
-            old_path = settings.UPLOAD_DIR / Path(media.original_path).name
-            new_path = settings.VAULT_DIR / Path(media.original_path).name
+            filename = Path(media.original_path).name
+            source_path = settings.UPLOAD_DIR / filename
+            dest_path = settings.VAULT_DIR / filename
             
-            if old_path.exists():
-                shutil.move(str(old_path), str(new_path))
-                media.is_encrypted = True
+            if source_path.exists():
+                try:
+                    shutil.move(str(source_path), str(dest_path))
+                    
+                    if dest_path.exists() and not source_path.exists():
+                        media.is_encrypted = True
+                        encrypted_count += 1
+                    elif dest_path.exists() and source_path.exists():
+                        os.remove(source_path)
+                        media.is_encrypted = True
+                        encrypted_count += 1
+                except Exception as e:
+                    print(f"Encryption error for {filename}: {e}")
             else:
-                print(f"File not found: {old_path}")
+                print(f"Source file not found: {source_path}")
 
     db.commit()
-    return {"status": "encrypted"}
+    return {"status": "encrypted", "count": encrypted_count}
 
 @router.post("/bulk/decrypt")
 def bulk_decrypt(ids: List[int], db: Session = Depends(database.get_db)):
     if vault_state.get_key() is None:
         raise HTTPException(status_code=403, detail="Vault locked")
 
+    decrypted_count = 0
     for mid in ids:
         media = db.query(models.Media).filter(models.Media.id == mid).first()
         if media and media.is_encrypted:
-            old_path = settings.VAULT_DIR / Path(media.original_path).name
-            new_path = settings.UPLOAD_DIR / Path(media.original_path).name
+            filename = Path(media.original_path).name
+            source_path = settings.VAULT_DIR / filename
+            dest_path = settings.UPLOAD_DIR / filename
             
-            if old_path.exists():
-                shutil.move(str(old_path), str(new_path))
-                media.is_encrypted = False
+            if source_path.exists():
+                try:
+                    shutil.move(str(source_path), str(dest_path))
+                    
+                    if dest_path.exists() and not source_path.exists():
+                        media.is_encrypted = False
+                        decrypted_count += 1
+                    elif dest_path.exists() and source_path.exists():
+                        os.remove(source_path)
+                        media.is_encrypted = False
+                        decrypted_count += 1
+                except Exception as e:
+                    print(f"Decryption error for {filename}: {e}")
             else:
-                print(f"Vault file not found: {old_path}")
+                print(f"Vault file not found: {source_path}")
 
     db.commit()
-    return {"status": "decrypted"}
+    return {"status": "decrypted", "count": decrypted_count}
 
 @router.post("/bulk/delete")
 def bulk_delete(ids: List[int], db: Session = Depends(database.get_db)):

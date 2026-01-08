@@ -23,7 +23,7 @@ class Settings:
         self.ACCESS_TOKEN_EXPIRE_MINUTES = 30
         
         self.VERSION = "1.0.1"
-        self.GITHUB_REPO_OWNER = "browensiz"
+        self.GITHUB_REPO_OWNER = "BrowenSiz"
         self.GITHUB_REPO_NAME = "HomeHub"
 
     def init_directories(self):
