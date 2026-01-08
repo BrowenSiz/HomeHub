@@ -4,23 +4,21 @@ cd /d "%~dp0"
 
 :loop
 cls
-echo ===================================================
-echo               HomeHub Launcher v1.0
-echo ===================================================
-echo.
+echo [HomeHub] Starting...
 
-if exist venv\Scripts\activate.bat (
-call venv\Scripts\activate
+if exist HomeHub.exe (
+echo Launching application...
+HomeHub.exe
 ) else (
-echo [WARNING] Virtual environment not found. Using system Python.
-)
-
-echo [INFO] Starting HomeHub Server...
+echo [ERROR] HomeHub.exe not found!
+echo Looking for python source code...
+if exist venv\Scripts\activate.bat call venv\Scripts\activate
 python -m backend.main
+)
 
 if exist .update_ready (
 echo.
-echo [UPDATE] New version detected. Installing...
+echo [UPDATE] Installing update...
 timeout /t 2 >nul
 
 xcopy update_stage\* . /E /Y /H
@@ -28,14 +26,12 @@ xcopy update_stage\* . /E /Y /H
 rmdir /s /q update_stage
 del .update_ready
 
-echo [UPDATE] Successfully updated!
-echo [INFO] Restarting server...
-timeout /t 3 >nul
+echo [UPDATE] Done! Restarting...
+timeout /t 2 >nul
 goto loop
 
 
 )
 
-echo.
-echo [INFO] Server stopped manually.
+echo [HomeHub] Application stopped.
 pause

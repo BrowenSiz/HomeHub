@@ -1,27 +1,29 @@
 import os
+import sys
 from pathlib import Path
 
 class Settings:
-    VERSION = "1.0.0"
-    
-    GITHUB_REPO_OWNER = "browensiz" 
-    GITHUB_REPO_NAME = "HomeHub"   
-    
-    BASE_DIR = Path(__file__).resolve().parent
-    ROOT_DIR = BASE_DIR.parent
-    
-    DATA_DIR = ROOT_DIR / "data"
-    
-    UPLOAD_DIR = DATA_DIR / "uploads"
-    THUMBNAIL_DIR = DATA_DIR / "thumbnails"
-    CACHE_DIR = DATA_DIR / "cache"
-    UPDATE_DIR = ROOT_DIR / "update_stage"
-    
-    DATABASE_URL = f"sqlite:///{DATA_DIR}/homehub.db"
-    
-    SECRET_KEY = "temporary_secret_key_change_in_production"
-    ALGORITHM = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES = 30
+    def __init__(self):
+        if getattr(sys, 'frozen', False):
+            self.ROOT_DIR = Path(sys.executable).parent
+        else:
+            self.ROOT_DIR = Path(__file__).resolve().parent.parent
+
+        self.DATA_DIR = self.ROOT_DIR / "data"
+        self.UPLOAD_DIR = self.DATA_DIR / "uploads"
+        self.THUMBNAIL_DIR = self.DATA_DIR / "thumbnails"
+        self.CACHE_DIR = self.DATA_DIR / "cache"
+        self.UPDATE_DIR = self.ROOT_DIR / "update_stage"
+        
+        self.DATABASE_URL = f"sqlite:///{self.DATA_DIR}/homehub.db"
+        
+        self.SECRET_KEY = "prod_secret_key"
+        self.ALGORITHM = "HS256"
+        self.ACCESS_TOKEN_EXPIRE_MINUTES = 30
+        
+        self.VERSION = "1.0.0"
+        self.GITHUB_REPO_OWNER = "browensiz"
+        self.GITHUB_REPO_NAME = "HomeHub"
 
     def init_directories(self):
         for path in [self.DATA_DIR, self.UPLOAD_DIR, self.THUMBNAIL_DIR, self.CACHE_DIR]:

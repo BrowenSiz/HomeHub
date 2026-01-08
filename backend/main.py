@@ -1,14 +1,19 @@
+import sys
+import os
+from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+import uvicorn
+import webbrowser
+import threading
+import time
+
 from .config import settings
 from .routers import auth, albums, media, system
 from .database import database
-import uvicorn
-import os
 
-# Инициализация
 settings.init_directories()
 database.Base.metadata.create_all(bind=database.engine)
 
@@ -29,25 +34,38 @@ app.include_router(system.router)
 
 app.mount("/thumbnails", StaticFiles(directory=settings.THUMBNAIL_DIR), name="thumbnails")
 
-# --- РАЗДАЧА FRONTEND ---
-FRONTEND_DIR = settings.BASE_DIR / "static"
+if getattr(sys, 'frozen', False):
+    BUNDLE_DIR = Path(sys._MEIPASS)
+else:
+    BUNDLE_DIR = Path(__file__).resolve().parent
 
-if FRONTEND_DIR.exists():
-    app.mount("/assets", StaticFiles(directory=FRONTEND_DIR / "assets"), name="assets")
+STATIC_DIR = BUNDLE_DIR / "static"
+
+if STATIC_DIR.exists():
+    app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
     
     @app.get("/{full_path:path}")
     async def serve_frontend(full_path: str):
         if full_path.startswith("api") or full_path.startswith("thumbnails"):
             return {"detail": "Not Found"}, 404
-            
-        index_path = FRONTEND_DIR / "index.html"
+        
+        index_path = STATIC_DIR / "index.html"
         if index_path.exists():
             return FileResponse(index_path)
-        return {"detail": "Frontend not found. Run 'npm run build' and copy dist to backend/static"}, 404
+        return {"detail": "Frontend not found"}, 404
 
 @app.get("/api/health")
 def health_check():
     return {"status": "ok", "version": settings.VERSION}
 
+def open_browser():
+    time.sleep(2)
+    webbrowser.open("http://127.0.0.1:8000")
+
+def start_app():
+    threading.Thread(target=open_browser, daemon=True).start()
+    
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+
 if __name__ == "__main__":
-    uvicorn.run("backend.main:app", host="0.0.0.0", port=8000, reload=False) 
+    start_app()

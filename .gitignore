@@ -17,16 +17,17 @@ yarn-error.log*
 
 --- Build Artifacts (Сборка) ---
 
+
 build/
 dist/
 *.spec
-frontend/dist/
 
 
 backend/static/assets/
 backend/static/index.html
 
 --- Project Data ---
+
 
 data/
 homehub.db
