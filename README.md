@@ -20,7 +20,7 @@
 
 ### Для пользователей (Windows)
 
-1. Скачайте последнюю версию `HomeHub_v1.0.0.zip` из раздела **[Releases](https://github.com/browensiz/HomeHub/releases)**.
+1. Скачайте последнюю версию `HomeHub_v1.1.0.zip` из раздела **[Releases](https://github.com/browensiz/HomeHub/releases)**.
 2. Распакуйте архив в любую удобную папку.
 3. Запустите файл `run`.
 4. При первом запуске придумайте **Мастер-пароль** и **PIN-код**.
