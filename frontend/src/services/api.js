@@ -33,8 +33,11 @@ export default {
 
   scanLibrary() { return apiClient.post('/media/scan'); },
 
+  // --- SYSTEM & AUTH ---
   getAuthStatus() { return apiClient.get('/auth/status'); },
-  getSystemStats() { return apiClient.get('/auth/stats'); },
+  
+  getSystemStats() { return apiClient.get('/system/stats'); },
+  
   setupSecurity(mp, pin) { return apiClient.post('/auth/setup', { master_password: mp, pin: pin }); },
   login(pin) { return apiClient.post('/auth/login', { pin }); },
   changePin(masterPassword, newPin) { 
@@ -43,6 +46,7 @@ export default {
   
   sendHeartbeat() { return apiClient.post('/system/heartbeat'); },
 
+  // --- UPDATER API ---
   checkUpdates() { return apiClient.get('/system/updates/check'); },
   installUpdate() { return apiClient.post('/system/updates/install'); },
   restartApp() { return apiClient.post('/system/restart'); },

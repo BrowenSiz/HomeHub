@@ -4,7 +4,6 @@ import api from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import { useNotificationStore } from '@/stores/notification'
 import { PlusIcon, ArrowPathIcon } from '@heroicons/vue/24/solid'
-import { ArrowLeftIcon } from '@heroicons/vue/24/outline'
 
 import Header from '@/components/Header.vue'
 import Sidebar from '@/components/Sidebar.vue'
@@ -16,6 +15,7 @@ import PinPad from '@/components/PinPad.vue'
 import ToastContainer from '@/components/ToastContainer.vue'
 import MediaViewer from '@/components/MediaViewer.vue'
 import Settings from '@/components/Settings.vue'
+import SystemStats from '@/components/SystemStats.vue'
 
 const authStore = useAuthStore()
 const notify = useNotificationStore()
@@ -44,6 +44,30 @@ const prevItem = computed(() => mediaItems.value[currentMediaIndex.value - 1] ||
 const fileInputRef = ref(null)
 let heartbeatInterval = null
 
+const pageTitle = computed(() => {
+  switch (currentView.value) {
+    case 'library': return 'Библиотека'
+    case 'albums': return 'Альбомы'
+    case 'album_detail': return activeAlbum.value?.name || 'Альбом'
+    case 'vault': return 'Личный сейф'
+    case 'system': return 'Хранилище'
+    case 'settings': return 'Настройки'
+    default: return 'HomeHub'
+  }
+})
+
+const pageSubtitle = computed(() => {
+  switch (currentView.value) {
+    case 'library': return `Все медиафайлы • ${mediaItems.value.length} объектов`
+    case 'albums': return 'Ваши коллекции'
+    case 'album_detail': return activeAlbum.value?.description || 'Просмотр содержимого'
+    case 'vault': return authStore.isVaultUnlocked ? 'Зашифрованное хранилище' : 'Доступ ограничен'
+    case 'system': return 'Статистика и ресурсы'
+    case 'settings': return 'Безопасность и обновления'
+    default: return ''
+  }
+})
+
 const startHeartbeat = () => {
   if (heartbeatInterval) clearInterval(heartbeatInterval)
   heartbeatInterval = setInterval(() => {
@@ -55,7 +79,6 @@ const startHeartbeat = () => {
 
 const initSystem = async (retryCount = 0) => {
   checkingAuth.value = true
-  
   try {
     const health = await api.checkHealth()
     apiInfo.value = health.data
@@ -80,7 +103,7 @@ const initSystem = async (retryCount = 0) => {
 }
 
 const loadData = async () => {
-  if (currentView.value === 'settings') return
+  if (currentView.value === 'settings' || currentView.value === 'system') return
 
   isLoading.value = true
   mediaItems.value = [] 
@@ -157,7 +180,12 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="h-screen w-full flex p-4 gap-4 overflow-hidden relative selection:bg-hub-accent selection:text-white font-sans">
+  <div class="h-screen w-full flex p-5 gap-5 overflow-hidden relative selection:bg-blue-500 selection:text-white font-sans bg-[#0f172a]">
+    
+    <!-- Фоновые пятна -->
+    <div class="fixed top-[-20%] left-[-10%] w-[50%] h-[50%] bg-blue-600/10 rounded-full blur-[120px] pointer-events-none"></div>
+    <div class="fixed bottom-[-20%] right-[-10%] w-[50%] h-[50%] bg-purple-600/10 rounded-full blur-[120px] pointer-events-none"></div>
+
     <ToastContainer />
     <input type="file" ref="fileInputRef" class="hidden" multiple accept="image/*,video/*,.cr2,.nef,.dng" @change="onFileChange" />
     
@@ -165,16 +193,19 @@ onUnmounted(() => {
     <MediaViewer :isOpen="viewerOpen" :item="activeItem" :nextItem="nextItem" :prevItem="prevItem" :hasNext="currentMediaIndex < mediaItems.length - 1" :hasPrev="currentMediaIndex > 0" @close="viewerOpen = false" @next="nextMedia" @prev="prevMedia" />
     
     <!-- LOADING -->
-    <div v-if="checkingAuth" class="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#111] text-white gap-4">
-        <div class="loader"></div>
-        <div class="text-white/30 text-sm animate-pulse">Запуск HomeHub...</div>
+    <div v-if="checkingAuth" class="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#0f172a] text-white gap-6">
+        <div class="relative w-16 h-16">
+          <div class="absolute inset-0 border-4 border-blue-500/20 rounded-full"></div>
+          <div class="absolute inset-0 border-4 border-blue-500 rounded-full border-t-transparent animate-spin"></div>
+        </div>
+        <div class="text-white/40 text-sm uppercase tracking-[0.2em] animate-pulse">Запуск системы</div>
     </div>
 
     <!-- ERROR -->
-    <div v-else-if="status === 'Офлайн'" class="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/90 text-white gap-4">
-       <div class="text-2xl font-bold text-red-400">Ошибка запуска</div>
-       <p class="text-white/50">Сервер не отвечает</p>
-       <button @click="initSystem(0)" class="px-6 py-2 bg-blue-600 rounded-lg hover:bg-blue-500 transition-colors">Повторить</button>
+    <div v-else-if="status === 'Офлайн'" class="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/90 text-white gap-6">
+       <div class="text-3xl font-bold text-red-500">Система недоступна</div>
+       <p class="text-white/50">Сервер не отвечает на запросы</p>
+       <button @click="initSystem(0)" class="px-8 py-3 bg-white/10 hover:bg-white/20 border border-white/10 rounded-xl transition-all">Повторить попытку</button>
     </div>
 
     <!-- WIZARD -->
@@ -182,80 +213,73 @@ onUnmounted(() => {
 
     <!-- MAIN UI -->
     <template v-else>
-      <div class="w-72 flex flex-col gap-4 shrink-0">
-        <div class="h-20 glass-panel rounded-3xl flex items-center px-6 gap-4">
-          <div class="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/30 border border-white/20">
+      <div class="w-72 flex flex-col gap-5 shrink-0 z-10">
+        <div class="h-20 glass-panel rounded-[2rem] flex items-center px-6 gap-5 relative overflow-hidden group">
+           <div class="absolute inset-0 bg-gradient-to-r from-blue-600/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+           
+           <div class="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/20 border border-white/20 z-10">
             <span class="text-white font-black text-xl">H</span>
           </div>
-          <div>
+          <div class="z-10">
             <h1 class="font-bold text-xl tracking-tight text-white leading-none">HomeHub</h1>
-            <span class="text-[10px] uppercase font-bold text-white/40 tracking-widest mt-0.5 block">
-              Release {{ apiInfo?.version || '...' }}
+            <span class="text-[10px] uppercase font-bold text-white/30 tracking-[0.2em] mt-0.5 block">
+              v{{ apiInfo?.version || '...' }}
             </span>
           </div>
         </div>
-        <Sidebar :currentView="currentView" @change-view="changeView" class="flex-1 rounded-3xl" />
+        <!-- Меню -->
+        <Sidebar :currentView="currentView" @change-view="changeView" class="flex-1" />
       </div>
 
-      <div class="flex-1 flex flex-col gap-4 min-w-0 h-full">
-        <Header :status="status" :apiInfo="apiInfo" />
-        <!-- Main Content -->
-        <main class="flex-1 glass-panel rounded-[2.5rem] overflow-hidden relative flex flex-col border border-white/5">
-          <div class="px-8 pt-8 pb-4 shrink-0 z-10">
-            <div v-if="currentView === 'library'" class="flex items-center justify-between">
-              <h2 class="text-3xl font-bold tracking-tight text-white flex items-center gap-3 drop-shadow-md">
-                Библиотека <span class="text-xs font-bold text-white/50 bg-white/10 px-2.5 py-1 rounded-full border border-white/5">{{ mediaItems.length }}</span>
-              </h2>
-            </div>
-            <div v-else-if="currentView === 'albums'" class="flex items-center justify-between">
-              <h2 class="text-3xl font-bold tracking-tight text-white drop-shadow-md">Мои Альбомы</h2>
-            </div>
-            <div v-else-if="currentView === 'album_detail'" class="flex items-center gap-4">
-              <button @click="changeView('albums')" class="p-3 hover:bg-white/10 rounded-2xl transition-colors text-white/70 hover:text-white border border-transparent hover:border-white/10">
-                <ArrowLeftIcon class="w-6 h-6" />
-              </button>
-              <div>
-                <h2 class="text-3xl font-bold text-white">{{ activeAlbum?.name }}</h2>
-                <p class="text-white/40 text-sm">{{ activeAlbum?.description || 'Альбом' }}</p>
-              </div>
-            </div>
-            <div v-else-if="currentView === 'vault' && authStore.isVaultUnlocked" class="flex justify-between items-center">
-              <h2 class="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-red-400 to-orange-400 flex items-center gap-3 drop-shadow-sm">
-                <span class="relative flex h-3 w-3"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span><span class="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span></span>
-                Личный сейф
-              </h2>
-              <button @click="authStore.lockVault()" class="px-5 py-2 text-sm font-bold text-red-200 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded-xl transition-all hover:shadow-[0_0_15px_rgba(239,68,68,0.2)]">LOCK</button>
-            </div>
-          </div>
-
-          <div class="flex-1 overflow-y-auto px-8 pb-8 scroll-smooth custom-scrollbar relative">
-            <div v-if="currentView === 'library'">
+      <div class="flex-1 flex flex-col gap-5 min-w-0 h-full z-10">
+        <Header 
+          :status="status" 
+          :apiInfo="apiInfo"
+          :title="pageTitle"
+          :subtitle="pageSubtitle"
+          :showBack="currentView === 'album_detail'"
+          :showLock="currentView === 'vault' && authStore.isVaultUnlocked"
+          @back="changeView('albums')"
+          @lock="authStore.lockVault()"
+        />
+        
+        <main class="flex-1 glass-panel rounded-[2rem] overflow-hidden relative flex flex-col">
+          
+          <div class="flex-1 overflow-y-auto px-8 py-8 scroll-smooth custom-scrollbar relative">
+            <div v-if="currentView === 'library' || currentView === 'album_detail'">
               <div v-if="isLoading" class="loader"></div>
               <MediaGrid v-else :items="mediaItems" @refresh="loadData" @open-viewer="openViewer" />
             </div>
+            
             <div v-else-if="currentView === 'albums'">
               <div v-if="isLoading" class="loader"></div>
               <AlbumList v-else :albums="albums" @open-album="openAlbum" @create-album="isCreateAlbumOpen = true" @delete-album="handleDeleteAlbum" />
             </div>
-            <div v-else-if="currentView === 'album_detail'">
-              <div v-if="isLoading" class="loader"></div>
-              <MediaGrid v-else :items="mediaItems" @refresh="loadData" @open-viewer="openViewer" />
-            </div>
+            
             <div v-else-if="currentView === 'vault'" class="h-full">
               <PinPad v-if="!authStore.isVaultUnlocked" :error="pinError" :loading="pinLoading" @submit="handlePinSubmit" />
               <div v-else class="flex flex-col h-full">
                 <div v-if="isLoading" class="loader border-red-500"></div>
                 <div v-else-if="mediaItems.length > 0" class="flex-1"><MediaGrid :items="mediaItems" @refresh="loadData" @open-viewer="openViewer" /></div>
-                <div v-else class="empty-state"><div class="text-6xl mb-4 grayscale opacity-30">🛡️</div><p class="text-xl font-medium text-white/70">Здесь пусто</p></div>
+                <div v-else class="empty-state"><div class="text-6xl mb-6 opacity-20 blur-sm">🔒</div><p class="text-2xl font-bold text-white/40">Сейф пуст</p></div>
               </div>
             </div>
+            
+            <div v-else-if="currentView === 'system'" class="h-full">
+              <SystemStats />
+            </div>
+
             <div v-else-if="currentView === 'settings'" class="h-full">
               <Settings />
             </div>
           </div>
           
-          <div v-if="currentView !== 'vault' && currentView !== 'settings'" class="absolute bottom-8 right-8 z-20">
-             <button @click="handleAddPhoto" :disabled="isUploading" class="h-16 w-16 rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-2xl shadow-blue-600/40 flex items-center justify-center text-white transition-all hover:scale-105 active:scale-95 group border border-white/20 disabled:opacity-70 disabled:cursor-not-allowed">
+          <div v-if="currentView !== 'vault' && currentView !== 'settings' && currentView !== 'system'" class="absolute bottom-10 right-10 z-20">
+             <button 
+                @click="handleAddPhoto" 
+                :disabled="isUploading" 
+                class="h-16 w-16 rounded-[1.5rem] bg-gradient-to-br from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-2xl shadow-blue-600/40 flex items-center justify-center text-white transition-all hover:scale-110 active:scale-95 group border border-white/20 disabled:opacity-70 disabled:grayscale"
+              >
                <ArrowPathIcon v-if="isUploading" class="w-8 h-8 animate-spin" />
                <PlusIcon v-else class="w-8 h-8 group-hover:rotate-90 transition-transform duration-300" />
              </button>
@@ -267,7 +291,7 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.loader { @apply flex justify-center py-20 animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-hub-accent mx-auto; }
+.loader { @apply flex justify-center py-20 animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-white mx-auto opacity-50; }
 .empty-state { @apply flex flex-col items-center justify-center h-full text-center p-10 opacity-60; }
 .custom-scrollbar::-webkit-scrollbar { width: 6px; }
 .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }

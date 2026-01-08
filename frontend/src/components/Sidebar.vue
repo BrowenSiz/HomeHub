@@ -1,73 +1,82 @@
 <script setup>
 import { computed } from 'vue'
+import { useAuthStore } from '@/stores/auth' 
 import { 
-  PhotoIcon, LockClosedIcon, LockOpenIcon, 
-  FolderIcon, Cog6ToothIcon
+  HomeIcon, 
+  FolderIcon, 
+  LockClosedIcon, 
+  LockOpenIcon,
+  Cog6ToothIcon,
+  ServerIcon
 } from '@heroicons/vue/24/outline'
-import { useAuthStore } from '@/stores/auth'
 
-const props = defineProps({ currentView: String })
-const emit = defineEmits(['change-view'])
+import { 
+  HomeIcon as HomeSolid, 
+  FolderIcon as FolderSolid, 
+  LockClosedIcon as LockSolid, 
+  LockOpenIcon as LockOpenSolid,
+  Cog6ToothIcon as CogSolid,
+  ServerIcon as ServerSolid
+} from '@heroicons/vue/24/solid'
+
+defineProps({
+  currentView: String
+})
+
+defineEmits(['change-view'])
+
 const authStore = useAuthStore()
 
-const menuItems = [
-  { id: 'library', label: 'Библиотека', icon: PhotoIcon },
-  { id: 'albums', label: 'Альбомы', icon: FolderIcon },
-]
-
-const vaultIcon = computed(() => authStore.isVaultUnlocked ? LockOpenIcon : LockClosedIcon)
+const menuItems = computed(() => [
+  { id: 'library', label: 'Библиотека', icon: HomeIcon, activeIcon: HomeSolid },
+  { id: 'albums', label: 'Альбомы', icon: FolderIcon, activeIcon: FolderSolid },
+  { 
+    id: 'vault', 
+    label: 'Сейф', 
+    icon: authStore.isVaultUnlocked ? LockOpenIcon : LockClosedIcon, 
+    activeIcon: authStore.isVaultUnlocked ? LockOpenSolid : LockSolid,
+    isVault: true 
+  },
+  { id: 'system', label: 'Хранилище', icon: ServerIcon, activeIcon: ServerSolid },
+])
 </script>
 
 <template>
-  <!-- Просто стеклянная панель с меню, без лого -->
-  <aside class="glass-panel rounded-3xl flex flex-col p-4 gap-2 overflow-hidden relative">
-    
-    <p class="px-4 py-2 text-[10px] font-bold text-white/30 uppercase tracking-widest">Навигация</p>
-    
-    <button 
-      v-for="item in menuItems" 
-      :key="item.id"
-      @click="emit('change-view', item.id)"
-      class="nav-item"
-      :class="{ 'glass-button-active': currentView === item.id || (item.id === 'library' && currentView === 'library') }"
-    >
-      <component :is="item.icon" class="w-6 h-6" :class="currentView === item.id ? 'text-hub-accent' : 'text-gray-400'" />
-      <span :class="currentView === item.id ? 'text-white font-bold' : 'text-gray-300'">{{ item.label }}</span>
-    </button>
+  <div class="flex flex-col h-full glass-panel rounded-[2rem] p-4 relative overflow-hidden">
+    <div class="absolute top-0 left-0 right-0 h-32 bg-gradient-to-b from-white/5 to-transparent pointer-events-none"></div>
 
-    <div class="h-px bg-white/5 my-4 mx-2"></div>
+    <nav class="flex-1 space-y-2 mt-2 z-10">
+      <button 
+        v-for="item in menuItems" 
+        :key="item.id"
+        @click="$emit('change-view', item.id)"
+        class="w-full flex items-center gap-4 px-4 py-4 rounded-2xl transition-all duration-300 group relative"
+        :class="currentView === item.id ? 'text-white shadow-lg shadow-black/20' : 'text-white/60 hover:text-white hover:bg-white/5'"
+      >
+        <div 
+          v-if="currentView === item.id" 
+          class="absolute inset-0 bg-gradient-to-r from-blue-600/80 to-indigo-600/80 backdrop-blur-md border border-white/10 rounded-2xl"
+        ></div>
 
-    <p class="px-4 py-2 text-[10px] font-bold text-white/30 uppercase tracking-widest">Приватность</p>
+        <component :is="currentView === item.id ? item.activeIcon : item.icon" class="w-6 h-6 z-10 relative transition-transform duration-300 group-hover:scale-110" />
+        <span class="font-bold text-sm z-10 relative tracking-wide">{{ item.label }}</span>
+        
+        <div 
+          v-if="item.isVault && authStore.isVaultUnlocked" 
+          class="absolute right-4 w-2 h-2 bg-green-400 rounded-full shadow-[0_0_10px_rgba(74,222,128,0.6)] animate-pulse z-20"
+        ></div>
+      </button>
+    </nav>
 
-    <button 
-      @click="emit('change-view', 'vault')"
-      class="nav-item group"
-      :class="{ 'active-vault': currentView === 'vault' }"
-    >
-      <component :is="vaultIcon" class="w-6 h-6 transition-transform group-hover:scale-110" :class="currentView === 'vault' ? 'text-red-400' : 'text-gray-400'" />
-      <span :class="currentView === 'vault' ? 'text-white font-bold' : 'text-gray-300'">Сейф</span>
-      <div v-if="authStore.isVaultUnlocked" class="ml-auto w-2 h-2 rounded-full bg-green-400 shadow-[0_0_10px_#4ade80]"></div>
-    </button>
-
-    <div class="mt-auto"></div>
-    
-    <button 
-      @click="emit('change-view', 'settings')"
-      class="nav-item text-white/40 hover:text-white"
-    >
-      <Cog6ToothIcon class="w-6 h-6" />
-      <span>Настройки</span>
-    </button>
-  </aside>
+    <div class="pt-4 mt-2 border-t border-white/5 z-10">
+      <button 
+        @click="$emit('change-view', 'settings')"
+        class="w-full flex items-center gap-4 px-4 py-4 rounded-2xl transition-all duration-300 text-white/60 hover:text-white hover:bg-white/5 relative group overflow-hidden"
+        :class="currentView === 'settings' ? 'text-white bg-white/10 border border-white/5' : ''"
+      >
+        <component :is="currentView === 'settings' ? CogSolid : Cog6ToothIcon" class="w-6 h-6 z-10 group-hover:rotate-90 transition-transform duration-500" />
+        <span class="font-bold text-sm z-10">Настройки</span>
+      </button>
+    </div>
+  </div>
 </template>
-
-<style scoped>
-.nav-item {
-  @apply w-full flex items-center gap-4 px-5 py-3.5 rounded-2xl text-sm font-medium transition-all duration-200 border border-transparent hover:bg-white/5 hover:border-white/5;
-}
-.active-vault {
-  background: linear-gradient(90deg, rgba(239, 68, 68, 0.15) 0%, rgba(239, 68, 68, 0.05) 100%);
-  border: 1px solid rgba(239, 68, 68, 0.2);
-  box-shadow: 0 0 15px rgba(239, 68, 68, 0.1);
-}
-</style>
