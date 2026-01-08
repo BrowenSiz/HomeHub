@@ -43,6 +43,10 @@ export default {
   
   sendHeartbeat() { return apiClient.post('/system/heartbeat'); },
 
+  checkUpdates() { return apiClient.get('/system/updates/check'); },
+  installUpdate() { return apiClient.post('/system/updates/install'); },
+  restartApp() { return apiClient.post('/system/restart'); },
+
   encryptMedia(ids) { 
     const payload = Array.isArray(ids) ? ids : [ids];
     return apiClient.post('/media/bulk/encrypt', payload); 

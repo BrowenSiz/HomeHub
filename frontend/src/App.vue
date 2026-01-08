@@ -70,7 +70,7 @@ const initSystem = async (retryCount = 0) => {
     checkingAuth.value = false
     
   } catch (error) {
-    if (retryCount < 10) {
+    if (retryCount < 20) {
       setTimeout(() => initSystem(retryCount + 1), 500)
     } else {
       status.value = 'Офлайн'
@@ -189,7 +189,9 @@ onUnmounted(() => {
           </div>
           <div>
             <h1 class="font-bold text-xl tracking-tight text-white leading-none">HomeHub</h1>
-            <span class="text-[10px] uppercase font-bold text-white/40 tracking-widest mt-0.5 block">Release 1.0.0</span>
+            <span class="text-[10px] uppercase font-bold text-white/40 tracking-widest mt-0.5 block">
+              Release {{ apiInfo?.version || '...' }}
+            </span>
           </div>
         </div>
         <Sidebar :currentView="currentView" @change-view="changeView" class="flex-1 rounded-3xl" />
@@ -197,7 +199,7 @@ onUnmounted(() => {
 
       <div class="flex-1 flex flex-col gap-4 min-w-0 h-full">
         <Header :status="status" :apiInfo="apiInfo" />
-
+        <!-- Main Content -->
         <main class="flex-1 glass-panel rounded-[2.5rem] overflow-hidden relative flex flex-col border border-white/5">
           <div class="px-8 pt-8 pb-4 shrink-0 z-10">
             <div v-if="currentView === 'library'" class="flex items-center justify-between">

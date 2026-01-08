@@ -1,179 +1,193 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue'
-import { 
-  ShieldCheckIcon, ServerStackIcon, CalculatorIcon, 
-  ArrowPathIcon, CheckCircleIcon 
-} from '@heroicons/vue/24/outline'
+import { ref, onMounted } from 'vue'
 import api from '@/services/api'
+import { useAuthStore } from '@/stores/auth'
 import { useNotificationStore } from '@/stores/notification'
+import { 
+  ShieldCheckIcon, 
+  ArrowPathIcon, 
+  KeyIcon,
+  CloudArrowDownIcon,
+  PowerIcon
+} from '@heroicons/vue/24/outline'
 
+const authStore = useAuthStore()
 const notify = useNotificationStore()
 
-const stats = ref(null)
-const isLoadingStats = ref(true)
-
-const masterPassword = ref('')
+const currentPin = ref('')
 const newPin = ref('')
 const confirmPin = ref('')
-const isChangingPin = ref(false)
+const masterPassword = ref('')
+const loading = ref(false)
 
-const canSubmit = computed(() => {
-  return masterPassword.value.length > 0 &&
-         newPin.value.length >= 4 &&
-         newPin.value === confirmPin.value
-})
-
-const loadStats = async () => {
-  isLoadingStats.value = true
-  try {
-    const res = await api.getSystemStats()
-    stats.value = res.data
-  } catch (e) {
-    console.error(e)
-  } finally {
-    isLoadingStats.value = false
-  }
-}
+const updateInfo = ref(null)
+const updateLoading = ref(false)
+const updateInstalling = ref(false)
+const updateReadyToRestart = ref(false)
 
 const handleChangePin = async () => {
-  if (!canSubmit.value) return
-  isChangingPin.value = true
+  if (newPin.value !== confirmPin.value) {
+    notify.show('PIN коды не совпадают', 'error')
+    return
+  }
+  if (newPin.value.length < 4) {
+    notify.show('PIN код слишком короткий', 'error')
+    return
+  }
+
+  loading.value = true
   try {
     await api.changePin(masterPassword.value, newPin.value)
     notify.show('PIN код успешно изменен', 'success')
-    masterPassword.value = ''
+    currentPin.value = ''
     newPin.value = ''
     confirmPin.value = ''
-  } catch (e) {
-    const msg = e.response?.data?.detail || 'Ошибка смены PIN'
-    notify.show(msg, 'error')
+    masterPassword.value = ''
+  } catch (error) {
+    notify.show('Ошибка смены PIN кода. Проверьте мастер-пароль.', 'error')
   } finally {
-    isChangingPin.value = false
+    loading.value = false
   }
 }
 
-const formatBytes = (bytes) => {
-  if (bytes === 0) return '0 B'
-  const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+const checkForUpdates = async () => {
+  updateLoading.value = true
+  try {
+    const res = await api.checkUpdates()
+    updateInfo.value = res.data
+    if (!res.data.update_available) {
+      notify.show('У вас установлена последняя версия', 'success')
+    }
+  } catch (e) {
+    notify.show('Ошибка проверки обновлений', 'error')
+  } finally {
+    updateLoading.value = false
+  }
+}
+
+const installUpdate = async () => {
+  if (!updateInfo.value?.update_available) return
+  
+  updateInstalling.value = true
+  try {
+    await api.installUpdate()
+    updateReadyToRestart.value = true
+    notify.show('Обновление готово к установке', 'success')
+  } catch (e) {
+    notify.show('Ошибка скачивания обновления', 'error')
+    updateInstalling.value = false
+  }
+}
+
+const restartApp = async () => {
+  try {
+    await api.restartApp()
+  } catch (e) {
+  }
 }
 
 onMounted(() => {
-  loadStats()
+  checkForUpdates()
 })
 </script>
 
 <template>
-  <div class="p-8 max-w-4xl mx-auto space-y-8 animate-fade-in pb-20">
-    <div>
-      <h2 class="text-3xl font-bold text-white mb-2">Настройки</h2>
-      <p class="text-gray-400">Управление безопасностью и системой</p>
-    </div>
+  <div class="max-w-4xl mx-auto space-y-8 pb-10">
+    
+    <!-- СЕКЦИЯ ОБНОВЛЕНИЯ -->
+    <section class="bg-white/5 rounded-3xl p-8 border border-white/10 backdrop-blur-md">
+      <div class="flex items-center gap-4 mb-6">
+        <div class="p-3 bg-blue-500/20 rounded-2xl text-blue-400">
+          <CloudArrowDownIcon class="w-8 h-8" />
+        </div>
+        <div>
+          <h3 class="text-xl font-bold text-white">Обновление системы</h3>
+          <p class="text-white/50 text-sm">Текущая версия: {{ updateInfo?.current_version || '...' }}</p>
+        </div>
+      </div>
 
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-      
-      <div class="space-y-6">
-        <h3 class="text-xl font-bold text-white flex items-center gap-2">
-          <ShieldCheckIcon class="w-6 h-6 text-hub-accent" />
-          Безопасность
-        </h3>
-        
-        <div class="bg-hub-panel border border-gray-700 rounded-2xl p-6 shadow-xl">
-          <h4 class="text-lg font-medium text-white mb-4">Смена PIN кода</h4>
-          <p class="text-xs text-gray-500 mb-6">
-            Для смены PIN кода необходимо ввести ваш текущий Мастер-пароль. Это гарантирует, что изменения вносит владелец.
-          </p>
+      <div class="bg-black/20 rounded-2xl p-6 border border-white/5">
+        <div v-if="updateLoading" class="flex items-center gap-3 text-white/70">
+          <ArrowPathIcon class="w-5 h-5 animate-spin" />
+          Проверка обновлений...
+        </div>
 
-          <form @submit.prevent="handleChangePin" class="space-y-4">
+        <div v-else-if="updateReadyToRestart" class="space-y-4">
+          <div class="text-green-400 font-medium flex items-center gap-2">
+            <ShieldCheckIcon class="w-5 h-5" />
+            Обновление скачано и готово
+          </div>
+          <p class="text-white/60 text-sm">Приложение перезапустится для завершения установки.</p>
+          <button @click="restartApp" class="px-6 py-3 bg-green-600 hover:bg-green-500 text-white rounded-xl font-bold transition-all flex items-center gap-2 w-full justify-center">
+            <PowerIcon class="w-5 h-5" />
+            Перезапустить HomeHub
+          </button>
+        </div>
+
+        <div v-else-if="updateInfo?.update_available" class="space-y-4">
+          <div class="flex justify-between items-start">
             <div>
-              <label class="label">Мастер-пароль</label>
-              <input v-model="masterPassword" type="password" class="input" placeholder="Ваш длинный пароль" />
+              <div class="text-lg font-bold text-white mb-1">Доступна версия {{ updateInfo.latest_version }}</div>
+              <div class="text-white/50 text-sm">Рекомендуется установить обновление</div>
             </div>
+            <span class="px-3 py-1 bg-blue-500/20 text-blue-300 text-xs font-bold rounded-full">NEW</span>
+          </div>
+          
+          <button 
+            @click="installUpdate" 
+            :disabled="updateInstalling"
+            class="w-full py-3 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl font-bold transition-all flex items-center justify-center gap-2"
+          >
+            <ArrowPathIcon v-if="updateInstalling" class="w-5 h-5 animate-spin" />
+            <span v-if="updateInstalling">Скачивание и установка...</span>
+            <span v-else>Скачать и обновить</span>
+          </button>
+        </div>
 
-            <div class="grid grid-cols-2 gap-4">
-              <div>
-                <label class="label">Новый PIN</label>
-                <input v-model="newPin" type="password" maxlength="8" class="input font-mono tracking-widest" placeholder="1234" />
-              </div>
-              <div>
-                <label class="label">Повторите PIN</label>
-                <input v-model="confirmPin" type="password" maxlength="8" class="input font-mono tracking-widest" placeholder="1234" />
-              </div>
-            </div>
+        <div v-else class="flex items-center justify-between text-white/60">
+          <span>У вас установлена последняя версия</span>
+          <button @click="checkForUpdates" class="text-blue-400 hover:text-blue-300 text-sm font-medium transition-colors">Проверить снова</button>
+        </div>
+      </div>
+    </section>
 
-            <button 
-              type="submit" 
-              :disabled="!canSubmit || isChangingPin"
-              class="w-full bg-hub-accent hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-3 rounded-xl transition-all flex justify-center"
-            >
-              <ArrowPathIcon v-if="isChangingPin" class="w-5 h-5 animate-spin" />
-              <span v-else>Обновить PIN</span>
-            </button>
-          </form>
+    <!-- СЕКЦИЯ БЕЗОПАСНОСТИ -->
+    <section class="bg-white/5 rounded-3xl p-8 border border-white/10 backdrop-blur-md">
+      <div class="flex items-center gap-4 mb-6">
+        <div class="p-3 bg-red-500/20 rounded-2xl text-red-400">
+          <KeyIcon class="w-8 h-8" />
+        </div>
+        <div>
+          <h3 class="text-xl font-bold text-white">Безопасность</h3>
+          <p class="text-white/50 text-sm">Смена PIN кода доступа</p>
         </div>
       </div>
 
-      <div class="space-y-6">
-        <h3 class="text-xl font-bold text-white flex items-center gap-2">
-          <ServerStackIcon class="w-6 h-6 text-purple-400" />
-          Система
-        </h3>
-
-        <div class="bg-hub-panel border border-gray-700 rounded-2xl p-6 shadow-xl relative overflow-hidden">
-          <div class="absolute top-0 right-0 w-32 h-32 bg-purple-500/10 rounded-full blur-3xl -mr-10 -mt-10 pointer-events-none"></div>
-
-          <div v-if="isLoadingStats" class="flex justify-center py-10">
-            <div class="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
-          </div>
-
-          <div v-else class="space-y-6 relative z-10">
-            <div class="flex justify-between items-center border-b border-white/5 pb-4">
-              <span class="text-gray-400">Версия HomeHub</span>
-              <span class="font-mono text-white">{{ stats.version }}</span>
-            </div>
-            
-            <div class="flex justify-between items-center border-b border-white/5 pb-4">
-              <span class="text-gray-400">Всего файлов</span>
-              <span class="text-white font-bold text-xl">{{ stats.total_files }}</span>
-            </div>
-
-            <div class="flex justify-between items-center border-b border-white/5 pb-4">
-              <span class="text-gray-400">Занято места</span>
-              <span class="text-white font-bold text-xl">{{ formatBytes(stats.total_size_bytes) }}</span>
-            </div>
-
-            <div class="flex items-start gap-3 bg-green-500/10 p-3 rounded-lg border border-green-500/20">
-              <CheckCircleIcon class="w-5 h-5 text-green-400 shrink-0 mt-0.5" />
-              <div>
-                <p class="text-sm font-medium text-green-400">Система активна</p>
-                <p class="text-xs text-green-400/70">База данных и хранилище работают корректно.</p>
-              </div>
-            </div>
-          </div>
+      <div class="space-y-4 max-w-md">
+        <div>
+          <label class="block text-white/70 text-sm font-medium mb-2">Мастер-пароль</label>
+          <input type="password" v-model="masterPassword" class="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500/50 transition-colors" placeholder="Введите мастер-пароль" />
+        </div>
+        
+        <div>
+          <label class="block text-white/70 text-sm font-medium mb-2">Новый PIN код</label>
+          <input type="password" v-model="newPin" maxlength="4" class="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500/50 transition-colors text-center tracking-[1em] font-mono" placeholder="••••" />
         </div>
 
-        <div class="bg-hub-panel border border-gray-700 rounded-2xl p-6 shadow-xl">
-          <h4 class="text-white font-medium mb-2 flex items-center gap-2">
-            <CalculatorIcon class="w-5 h-5 text-gray-400" />
-            О проекте
-          </h4>
-          <p class="text-sm text-gray-400 leading-relaxed">
-            HomeHub — это локальное решение для хранения ваших воспоминаний. Ваши данные никогда не покидают это устройство.
-            <br><br>
-            В версии <b>v1.0</b> добавлены функции смены PIN-кода и улучшенная производительность сканирования.
-          </p>
+        <div>
+          <label class="block text-white/70 text-sm font-medium mb-2">Подтвердите PIN</label>
+          <input type="password" v-model="confirmPin" maxlength="4" class="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500/50 transition-colors text-center tracking-[1em] font-mono" placeholder="••••" />
         </div>
 
+        <button 
+          @click="handleChangePin" 
+          :disabled="loading || !masterPassword || newPin.length < 4"
+          class="w-full py-4 bg-white/10 hover:bg-white/20 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl font-bold transition-all mt-4"
+        >
+          <span v-if="loading">Сохранение...</span>
+          <span v-else>Изменить PIN</span>
+        </button>
       </div>
-    </div>
+    </section>
   </div>
 </template>
-
-<style scoped>
-.label { @apply block text-xs font-medium text-gray-500 mb-1.5 uppercase tracking-wide; }
-.input { @apply w-full bg-black/30 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:border-hub-accent focus:ring-1 focus:ring-hub-accent outline-none transition-all placeholder-gray-700; }
-.animate-fade-in { animation: fadeIn 0.4s ease-out; }
-@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-</style>

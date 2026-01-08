@@ -15,12 +15,16 @@ import webview
 from .config import settings
 from .routers import auth, albums, media, system
 from .database import database
+from .services import updater
+
+updater.cleanup_old_versions()
 
 settings.init_directories()
 database.Base.metadata.create_all(bind=database.engine)
 
 app = FastAPI(title="HomeHub", version=settings.VERSION)
 
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], 
@@ -95,7 +99,6 @@ def init_window(window):
             <div style="text-align:center">
                 <h2 style="color:#ff5555">Ошибка запуска</h2>
                 <p>Не удалось подключиться к серверу HomeHub.</p>
-                <p style="opacity:0.5; font-size:0.8em">Попробуйте перезапустить приложение.</p>
             </div>
         </body>
         """
@@ -110,47 +113,25 @@ def start_app():
 
     loading_html = """
     <!DOCTYPE html>
-    <html style="background: #0f172a;"> <!-- Цвет фона как у приложения -->
+    <html style="background: #0f172a;">
     <head>
         <style>
             body { 
-                margin: 0; 
-                display: flex; 
-                justify-content: center; 
-                align-items: center; 
-                height: 100vh; 
-                font-family: system-ui, -apple-system, sans-serif;
-                color: white;
-                user-select: none;
+                margin: 0; display: flex; justify-content: center; align-items: center; 
+                height: 100vh; font-family: system-ui, sans-serif; color: white; user-select: none;
             }
             .loader {
-                width: 48px;
-                height: 48px;
-                border: 3px solid #3b82f6;
-                border-radius: 50%;
-                display: inline-block;
-                position: relative;
-                box-sizing: border-box;
+                width: 48px; height: 48px; border: 3px solid #3b82f6; border-radius: 50%;
+                display: inline-block; position: relative; box-sizing: border-box;
                 animation: rotation 1s linear infinite;
             }
             .loader::after {
-                content: '';  
-                box-sizing: border-box;
-                position: absolute;
-                left: 50%;
-                top: 50%;
-                transform: translate(-50%, -50%);
-                width: 40px;
-                height: 40px;
-                border-radius: 50%;
-                border: 3px solid transparent;
-                border-bottom-color: #ef4444;
+                content: ''; box-sizing: border-box; position: absolute; left: 50%; top: 50%;
+                transform: translate(-50%, -50%); width: 40px; height: 40px; border-radius: 50%;
+                border: 3px solid transparent; border-bottom-color: #ef4444;
                 animation: rotation 1.5s linear infinite reverse;
             }
-            @keyframes rotation {
-                0% { transform: rotate(0deg); }
-                100% { transform: rotate(360deg); }
-            }
+            @keyframes rotation { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         </style>
     </head>
     <body>

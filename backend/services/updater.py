@@ -1,66 +1,113 @@
-import requests
-import zipfile
-import shutil
 import os
 import sys
+import shutil
+import requests
+import zipfile
+import tempfile
+import subprocess
 from pathlib import Path
 from ..config import settings
 
+def cleanup_old_versions():
+    if getattr(sys, 'frozen', False):
+        current_exe = Path(sys.executable)
+        old_exe = current_exe.with_name(current_exe.name + ".old")
+        
+        if old_exe.exists():
+            try:
+                os.remove(old_exe)
+                print(f"[Updater] Cleaned up old version: {old_exe}")
+            except Exception as e:
+                print(f"[Updater] Cleanup failed (will try next time): {e}")
+
 def check_for_updates():
-    url = f"https://api.github.com/repos/{settings.GITHUB_REPO_OWNER}/{settings.GITHUB_REPO_NAME}/releases/latest"
     try:
-        response = requests.get(url, timeout=5)
-        if response.status_code == 200:
-            data = response.json()
+        url = f"https://api.github.com/repos/{settings.GITHUB_REPO_OWNER}/{settings.GITHUB_REPO_NAME}/releases/latest"
+        resp = requests.get(url, timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
             latest_version = data['tag_name'].lstrip('v')
-            current_version = settings.VERSION
             
-            update_available = latest_version != current_version
-            
-            return {
-                "current_version": current_version,
-                "latest_version": latest_version,
-                "update_available": update_available,
-                "download_url": data['zipball_url'],
-                "release_notes": data['body']
-            }
-        return None
+            if latest_version != settings.VERSION:
+                download_url = None
+                for asset in data['assets']:
+                    if asset['name'].endswith('.zip') or asset['name'].endswith('.exe'):
+                        download_url = asset['browser_download_url']
+                        break
+                
+                return {
+                    "update_available": True,
+                    "latest_version": latest_version,
+                    "current_version": settings.VERSION,
+                    "download_url": download_url,
+                    "release_notes": data['body']
+                }
     except Exception as e:
-        print(f"Update check failed: {e}")
-        return None
+        print(f"[Updater] Check failed: {e}")
+    
+    return {"update_available": False, "current_version": settings.VERSION}
 
-def perform_update(download_url: str):
-    if settings.UPDATE_DIR.exists():
-        shutil.rmtree(settings.UPDATE_DIR)
-    settings.UPDATE_DIR.mkdir()
-
-    zip_path = settings.UPDATE_DIR / "update.zip"
+def perform_update_in_place(download_url: str):
+    if not getattr(sys, 'frozen', False):
+        print("[Updater] Cannot update in development mode (not frozen).")
+        return False
 
     try:
-        print(f"Downloading update from {download_url}...")
-        response = requests.get(download_url, stream=True)
-        with open(zip_path, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
+        current_exe = Path(sys.executable)
+        exe_dir = current_exe.parent
         
-        print("Extracting...")
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            zip_ref.extractall(settings.UPDATE_DIR)
+        print(f"[Updater] Downloading from {download_url}...")
+        resp = requests.get(download_url, stream=True)
+        resp.raise_for_status()
         
-        extracted_root = next(settings.UPDATE_DIR.iterdir())
-        if extracted_root.is_dir():
-            for item in extracted_root.iterdir():
-                shutil.move(str(item), str(settings.UPDATE_DIR))
-            extracted_root.rmdir()
-        
-        os.remove(zip_path)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp_file:
+            for chunk in resp.iter_content(chunk_size=8192):
+                tmp_file.write(chunk)
+            tmp_zip_path = Path(tmp_file.name)
 
-        with open(settings.ROOT_DIR / ".update_ready", "w") as f:
-            f.write("ready")
+        new_exe_source = None
+        extract_dir = Path(tempfile.gettempdir()) / "homehub_update_extract"
+        if extract_dir.exists(): shutil.rmtree(extract_dir)
+        extract_dir.mkdir()
 
-        print("Update prepared. Restarting...")
-        return True
+        try:
+            if download_url.endswith('.zip'):
+                with zipfile.ZipFile(tmp_zip_path, 'r') as zip_ref:
+                    zip_ref.extractall(extract_dir)
+                
+                found = list(extract_dir.rglob("HomeHub.exe"))
+                if not found:
+                    raise Exception("HomeHub.exe not found in update archive")
+                new_exe_source = found[0]
+            
+            elif download_url.endswith('.exe'):
+                new_exe_source = extract_dir / "HomeHub.exe"
+                shutil.copy(tmp_zip_path, new_exe_source)
+            
+            old_exe_path = current_exe.with_name(current_exe.name + ".old")
+            if old_exe_path.exists():
+                os.remove(old_exe_path)
+            
+            os.rename(current_exe, old_exe_path)
+            
+            shutil.move(str(new_exe_source), str(current_exe))
+            
+            os.remove(tmp_zip_path)
+            shutil.rmtree(extract_dir)
+            
+            return True
+
+        except Exception as e:
+            print(f"[Updater] Extraction/Swap failed: {e}")
+            if 'old_exe_path' in locals() and old_exe_path.exists() and not current_exe.exists():
+                os.rename(old_exe_path, current_exe)
+            return False
 
     except Exception as e:
-        print(f"Update failed: {e}")
+        print(f"[Updater] Update process failed: {e}")
         return False
+
+def restart_application():
+    if getattr(sys, 'frozen', False):
+        subprocess.Popen([sys.executable])
+        os._exit(0)
