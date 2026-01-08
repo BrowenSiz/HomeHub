@@ -1,61 +1,89 @@
+from PIL import Image
 import os
-from PIL import Image, ImageOps
-import cv2
-from ..config import settings
+import io
 from pathlib import Path
+from ..config import settings
+from ..database import models
 
-def generate_thumbnail(media_item):
-    if not media_item.original_path:
-        return None
-        
-    thumb_filename = f"thumb_{media_item.id}.jpg"
-    thumb_path = settings.THUMBNAIL_DIR / thumb_filename
-    
-    if thumb_path.exists():
-        return str(thumb_path)
-        
-    filename = Path(media_item.original_path).name
-    if media_item.is_encrypted:
-        source_path = settings.VAULT_DIR / filename
-    else:
-        source_path = settings.UPLOAD_DIR / filename
-    
+try:
+    import cv2
+    HAS_CV2 = True
+except ImportError:
+    HAS_CV2 = False
+
+def generate_thumbnail(media: models.Media) -> Path:
+    source_path = settings.UPLOAD_DIR / Path(media.original_path).name
     if not source_path.exists():
         return None
+
+    target_name = f"thumb_{media.id}.jpg"
+    target_path = settings.THUMBNAIL_DIR / target_name
     
+    settings.THUMBNAIL_DIR.mkdir(parents=True, exist_ok=True)
+
     try:
-        img = None
-        
-        if media_item.media_type and media_item.media_type.startswith('video/'):
-            try:
-                cap = cv2.VideoCapture(str(source_path))
-                if cap.isOpened():
-                    cap.set(cv2.CAP_PROP_POS_MSEC, 1000)
-                    ret, frame = cap.read()
-                    if not ret:
-                        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                        ret, frame = cap.read()
-                    if ret:
-                        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                        img = Image.fromarray(frame_rgb)
-                    cap.release()
-            except Exception: pass
-
-        if img is None:
-            try:
-                img = Image.open(source_path)
-            except IOError: return None
-
-        try: img = ImageOps.exif_transpose(img)
-        except Exception: pass
-
-        if img.mode in ("RGBA", "P"): img = img.convert("RGB")
-            
-        img.thumbnail((400, 400), Image.Resampling.LANCZOS)
-        img.save(thumb_path, "JPEG", quality=85)
-        
-        return str(thumb_path)
-
+        if "video" in media.media_type:
+            return _generate_video_thumbnail_file(source_path, target_path)
+        else:
+            return _generate_image_thumbnail_file(source_path, target_path)
     except Exception as e:
-        print(f"Thumb error: {e}")
+        print(f"Thumbnail generation error for {media.id}: {e}")
         return None
+
+def generate_memory_thumbnail(file_path: Path, media_type: str) -> bytes:
+    try:
+        if "video" in media_type:
+            return _generate_video_thumbnail_bytes(file_path)
+        else:
+            return _generate_image_thumbnail_bytes(file_path)
+    except Exception as e:
+        print(f"Memory thumbnail error: {e}")
+        return None
+
+def _generate_image_thumbnail_file(source: Path, target: Path) -> Path:
+    with Image.open(source) as img:
+        img.thumbnail((300, 300))
+        if img.mode in ("RGBA", "P"): 
+            img = img.convert("RGB")
+        img.save(target, "JPEG", quality=80)
+    return target
+
+def _generate_video_thumbnail_file(source: Path, target: Path) -> Path:
+    if not HAS_CV2: return None
+    
+    cap = cv2.VideoCapture(str(source))
+    success, frame = cap.read()
+    cap.release()
+    
+    if success:
+        img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        img.thumbnail((300, 300))
+        img.save(target, "JPEG", quality=80)
+        return target
+    return None
+
+def _generate_image_thumbnail_bytes(source: Path) -> bytes:
+    with Image.open(source) as img:
+        img.thumbnail((300, 300))
+        if img.mode in ("RGBA", "P"): 
+            img = img.convert("RGB")
+        
+        output = io.BytesIO()
+        img.save(output, format="JPEG", quality=80)
+        return output.getvalue()
+
+def _generate_video_thumbnail_bytes(source: Path) -> bytes:
+    if not HAS_CV2: return None
+
+    cap = cv2.VideoCapture(str(source))
+    success, frame = cap.read()
+    cap.release()
+
+    if success:
+        img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        img.thumbnail((300, 300))
+        
+        output = io.BytesIO()
+        img.save(output, format="JPEG", quality=80)
+        return output.getvalue()
+    return None

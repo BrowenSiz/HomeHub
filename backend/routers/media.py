@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session, joinedload
 from typing import List
 import os
@@ -7,7 +7,7 @@ import shutil
 import mimetypes
 from pathlib import Path
 from ..database import database, models
-from .. import schemas
+from .. import schemas, crypto_utils
 from ..services import scanner, thumbnail
 from ..config import settings
 from ..runtime import vault_state
@@ -41,6 +41,11 @@ def upload_files(files: List[UploadFile] = File(...), db: Session = Depends(data
     for file in files:
         try:
             file_path = settings.UPLOAD_DIR / file.filename
+            if file_path.exists():
+                name = file_path.stem
+                ext = file_path.suffix
+                file_path = settings.UPLOAD_DIR / f"{name}_{int(os.time())}{ext}"
+
             with open(file_path, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
             
@@ -49,32 +54,42 @@ def upload_files(files: List[UploadFile] = File(...), db: Session = Depends(data
             
             stat = os.stat(file_path)
             new_media = models.Media(
-                filename=file.filename,
-                original_path=file.filename,
+                filename=file_path.name,
+                original_path=file_path.name,
                 media_type=mime_type,
                 file_size=stat.st_size,
                 is_encrypted=False
             )
             db.add(new_media)
             count += 1
-        except Exception:
+        except Exception as e:
+            print(f"Upload error: {e}")
             continue
     db.commit()
     return {"status": "success", "count": count}
 
 @router.post("/scan")
 def trigger_scan(background_tasks: BackgroundTasks, db: Session = Depends(database.get_db)):
-    background_tasks.add_task(scanner.scan_directory, db)
+    background_tasks.add_task(scanner.scan_storage, db)
     return {"status": "scanning_started"}
 
 @router.get("/{media_id}/content")
 def get_media_content(media_id: int, db: Session = Depends(database.get_db)):
     media = get_media_item(db, media_id)
-    
+    key = vault_state.get_key()
+
     if media.is_encrypted:
-        if vault_state.get_key() is None:
+        if key is None:
             raise HTTPException(status_code=403, detail="Vault locked")
         file_path = settings.VAULT_DIR / Path(media.original_path).name
+        
+        if not file_path.exists():
+             raise HTTPException(status_code=404, detail="Encrypted file not found")
+        
+        return StreamingResponse(
+            crypto_utils.decrypt_file_generator(file_path, key),
+            media_type=media.media_type
+        )
     else:
         file_path = settings.UPLOAD_DIR / Path(media.original_path).name
 
@@ -89,15 +104,26 @@ def get_media_thumbnail(media_id: int, db: Session = Depends(database.get_db)):
     if media.is_encrypted and vault_state.get_key() is None:
         raise HTTPException(status_code=403, detail="Vault locked")
 
-    thumb_path = thumbnail.generate_thumbnail(media)
-    if not thumb_path or not os.path.exists(thumb_path):
+    thumb_path_str = media.thumbnail_path
+    if not thumb_path_str:
+         thumb_path_str = f"thumb_{media.id}.jpg"
+
+    thumb_path = settings.THUMBNAIL_DIR / thumb_path_str
+    
+    if not thumb_path.exists():
+        if not media.is_encrypted or vault_state.get_key() is not None:
+             new_path = thumbnail.generate_thumbnail(media)
+             if new_path:
+                 return FileResponse(new_path, media_type="image/jpeg")
+        
         raise HTTPException(status_code=404, detail="Thumbnail not found")
         
     return FileResponse(thumb_path, media_type="image/jpeg")
 
 @router.post("/bulk/encrypt")
 def bulk_encrypt(ids: List[int], db: Session = Depends(database.get_db)):
-    if vault_state.get_key() is None:
+    key = vault_state.get_key()
+    if key is None:
         raise HTTPException(status_code=403, detail="Vault locked")
         
     encrypted_count = 0
@@ -110,17 +136,19 @@ def bulk_encrypt(ids: List[int], db: Session = Depends(database.get_db)):
             
             if source_path.exists():
                 try:
-                    shutil.move(str(source_path), str(dest_path))
+                    crypto_utils.encrypt_file(source_path, dest_path, key)
                     
-                    if dest_path.exists() and not source_path.exists():
-                        media.is_encrypted = True
-                        encrypted_count += 1
-                    elif dest_path.exists() and source_path.exists():
+                    if dest_path.exists() and dest_path.stat().st_size > 0:
                         os.remove(source_path)
                         media.is_encrypted = True
+                        media.original_path = filename
                         encrypted_count += 1
+                    else:
+                        print(f"Encryption failed for {filename}: Empty result")
+                        
                 except Exception as e:
                     print(f"Encryption error for {filename}: {e}")
+                    if dest_path.exists(): os.remove(dest_path)
             else:
                 print(f"Source file not found: {source_path}")
 
@@ -129,7 +157,8 @@ def bulk_encrypt(ids: List[int], db: Session = Depends(database.get_db)):
 
 @router.post("/bulk/decrypt")
 def bulk_decrypt(ids: List[int], db: Session = Depends(database.get_db)):
-    if vault_state.get_key() is None:
+    key = vault_state.get_key()
+    if key is None:
         raise HTTPException(status_code=403, detail="Vault locked")
 
     decrypted_count = 0
@@ -142,17 +171,18 @@ def bulk_decrypt(ids: List[int], db: Session = Depends(database.get_db)):
             
             if source_path.exists():
                 try:
-                    shutil.move(str(source_path), str(dest_path))
+                    crypto_utils.decrypt_file_to_disk(source_path, dest_path, key)
                     
-                    if dest_path.exists() and not source_path.exists():
-                        media.is_encrypted = False
-                        decrypted_count += 1
-                    elif dest_path.exists() and source_path.exists():
+                    if dest_path.exists() and dest_path.stat().st_size > 0:
                         os.remove(source_path)
                         media.is_encrypted = False
                         decrypted_count += 1
+                    else:
+                         print(f"Decryption failed for {filename}")
+
                 except Exception as e:
                     print(f"Decryption error for {filename}: {e}")
+                    if dest_path.exists(): os.remove(dest_path)
             else:
                 print(f"Vault file not found: {source_path}")
 
@@ -171,7 +201,8 @@ def bulk_delete(ids: List[int], db: Session = Depends(database.get_db)):
                 if file_path.exists():
                     os.remove(file_path)
                 
-                thumb_path = settings.THUMBNAIL_DIR / f"thumb_{media.id}.jpg"
+                thumb_str = media.thumbnail_path or f"thumb_{media.id}.jpg"
+                thumb_path = settings.THUMBNAIL_DIR / thumb_str
                 if thumb_path.exists():
                     os.remove(thumb_path)
             except Exception as e:

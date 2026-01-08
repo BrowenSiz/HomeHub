@@ -8,6 +8,18 @@ import time
 
 router = APIRouter(prefix="/api/system", tags=["system"])
 
+_heartbeat_callback = None
+
+def set_heartbeat_callback(cb):
+    global _heartbeat_callback
+    _heartbeat_callback = cb
+
+@router.post("/heartbeat")
+def heartbeat():
+    if _heartbeat_callback:
+        _heartbeat_callback()
+    return {"status": "alive"}
+
 @router.get("/version")
 def get_version():
     return {"version": settings.VERSION}
@@ -16,7 +28,7 @@ def get_version():
 def check_updates():
     info = updater.check_for_updates()
     if not info:
-        raise HTTPException(status_code=503, detail="Не удалось проверить обновления")
+        return {"update_available": False} 
     return info
 
 @router.post("/updates/install")
@@ -29,7 +41,7 @@ def install_update():
     
     if success:
         def kill_server():
-            time.sleep(1)
+            time.sleep(2)
             print("Shutting down for update...")
             os.kill(os.getpid(), signal.SIGTERM)
             
