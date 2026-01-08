@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import api from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import { useNotificationStore } from '@/stores/notification'
@@ -42,6 +42,16 @@ const nextItem = computed(() => mediaItems.value[currentMediaIndex.value + 1] ||
 const prevItem = computed(() => mediaItems.value[currentMediaIndex.value - 1] || null)
 
 const fileInputRef = ref(null)
+let heartbeatInterval = null
+
+// --- HEARTBEAT LOGIC ---
+const startHeartbeat = () => {
+  heartbeatInterval = setInterval(() => {
+    api.sendHeartbeat().catch(() => {
+      status.value = 'Офлайн'
+    })
+  }, 3000)
+}
 
 const initSystem = async () => {
   try {
@@ -51,6 +61,8 @@ const initSystem = async () => {
     const authStatus = await api.getAuthStatus()
     isSetupComplete.value = authStatus.data.is_setup
     
+    startHeartbeat()
+
     if (isSetupComplete.value) await loadData()
   } catch (error) {
     status.value = 'Офлайн'
@@ -94,12 +106,7 @@ const changeView = (viewId) => {
 const openAlbum = (album) => { activeAlbum.value = album; currentView.value = 'album_detail'; loadData() }
 const handleCreateAlbum = async (data) => { await api.createAlbum(data); loadData() }
 const handleDeleteAlbum = async (id) => { await api.deleteAlbum(id); loadData() }
-const handlePinSubmit = async (pin) => {
-  pinLoading.value = true
-  pinError.value = ''
-  if (await authStore.unlockVault(pin)) { await loadData() } else { pinError.value = 'Неверный PIN код' }
-  pinLoading.value = false
-}
+
 const onSetupFinished = async () => { isSetupComplete.value = true; await loadData() }
 const openViewer = (item) => {
   const index = mediaItems.value.findIndex(i => i.id === item.id)
@@ -124,7 +131,21 @@ const onFileChange = async (event) => {
   finally { isUploading.value = false }
 }
 
+const handlePinSubmit = async (pin) => {
+  pinLoading.value = true
+  pinError.value = ''
+  if (await authStore.unlockVault(pin)) { 
+    await loadData() 
+  } else { 
+    pinError.value = 'Неверный PIN код' 
+  }
+  pinLoading.value = false
+}
+
 onMounted(() => initSystem())
+onUnmounted(() => {
+  if (heartbeatInterval) clearInterval(heartbeatInterval)
+})
 </script>
 
 <template>

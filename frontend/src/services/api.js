@@ -40,6 +40,8 @@ export default {
   changePin(masterPassword, newPin) { 
     return apiClient.post('/auth/change-pin', { master_password: masterPassword, new_pin: newPin }); 
   },
+  
+  sendHeartbeat() { return apiClient.post('/system/heartbeat'); },
 
   encryptMedia(ids) { 
     const payload = Array.isArray(ids) ? ids : [ids];
