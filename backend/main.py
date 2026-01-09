@@ -17,7 +17,10 @@ from .routers import auth, albums, media, system
 from .services import updater 
 from .database import database
 
-updater.cleanup_old_versions()
+try:
+    updater.cleanup_old_versions()
+except:
+    pass
 
 settings.init_directories()
 database.Base.metadata.create_all(bind=database.engine)
@@ -44,6 +47,7 @@ app.include_router(system.router)
 settings.THUMBNAIL_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/thumbnails", StaticFiles(directory=settings.THUMBNAIL_DIR), name="thumbnails")
 
+# Static Files
 is_frozen = getattr(sys, 'frozen', False)
 if is_frozen:
     BUNDLE_DIR = Path(sys._MEIPASS)
@@ -89,27 +93,24 @@ def check_server_port(host, port):
         return False
 
 def init_window(window):
-    server_ready = False
+    # Wait for server
     for i in range(30):
         if check_server_port("127.0.0.1", 8000):
-            server_ready = True
-            break
+            window.load_url("http://127.0.0.1:8000")
+            return
         time.sleep(0.5)
     
-    if server_ready:
-        window.load_url("http://127.0.0.1:8000")
-    else:
-        window.load_html("<h1>Error: Server unreachable</h1>")
-
-def on_closed():
-    os._exit(0)
+    window.load_html("<h1 style='color:white; font-family:sans-serif'>Server Timeout</h1>")
 
 def get_icon_path():
     icon_name = "favicon.ico"
     if is_frozen:
-        return str(Path(sys._MEIPASS) / "static" / icon_name)
+        icon_path = Path(sys._MEIPASS) / "static" / icon_name
+        if icon_path.exists(): return str(icon_path)
     else:
-        return str(Path(__file__).parent.parent / "frontend" / "public" / icon_name)
+        dev_path = Path(__file__).resolve().parent.parent / "frontend" / "public" / icon_name
+        if dev_path.exists(): return str(dev_path)
+    return None
 
 def start_app():
     t = threading.Thread(target=start_server, daemon=True)
@@ -117,15 +118,22 @@ def start_app():
 
     loading_html = """
     <!DOCTYPE html>
-    <html style="background: #0f172a;">
+    <html style="background: #0f172a; color: white; font-family: sans-serif;">
     <head><style>
-        body { display: flex; justify-content: center; align-items: center; height: 100vh; color: white; font-family: sans-serif; }
-        .loader { width: 48px; height: 48px; border: 3px solid #3b82f6; border-radius: 50%; border-bottom-color: transparent; animation: rot 1s linear infinite; }
-        @keyframes rot { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        body { margin: 0; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .loader { width: 50px; height: 50px; border: 3px solid #3b82f6; border-top-color: transparent; border-radius: 50%; animation: s 1s linear infinite; }
+        @keyframes s { to { transform: rotate(360deg); } }
     </style></head>
-    <body><div><div class="loader"></div><div style="margin-top:20px">HOMEHUB</div></div></body>
+    <body>
+        <div style="text-align:center">
+            <div class="loader"></div>
+            <p style="margin-top:20px; opacity:0.7">STARTING...</p>
+        </div>
+    </body>
     </html>
     """
+
+    icon_path = get_icon_path()
 
     window = webview.create_window(
         title="HomeHub", 
@@ -134,11 +142,12 @@ def start_app():
         height=850,
         min_size=(1000, 700),
         background_color='#0f172a',
-        resizable=True
+        resizable=True,
+        frameless=False,
+        easy_drag=False
     )
     
-    icon = get_icon_path()
-    webview.start(init_window, window, icon=icon)
+    webview.start(init_window, window, gui='edgechromium', debug=False)
 
 if __name__ == "__main__":
     start_app()

@@ -18,6 +18,8 @@ export default {
   getMedia(skip = 0, limit = 1000) { return apiClient.get(`/media/?skip=${skip}&limit=${limit}`); },
   getVaultMedia(skip = 0, limit = 1000) { return apiClient.get(`/media/vault?skip=${skip}&limit=${limit}`); },
   
+  getMediaDetails(id) { return apiClient.get(`/media/${id}/details`); },
+
   uploadFiles(formData) {
     return apiClient.post('/media/upload', formData, {
       headers: {
@@ -33,11 +35,8 @@ export default {
 
   scanLibrary() { return apiClient.post('/media/scan'); },
 
-  // --- SYSTEM & AUTH ---
   getAuthStatus() { return apiClient.get('/auth/status'); },
-  
   getSystemStats() { return apiClient.get('/system/stats'); },
-  
   setupSecurity(mp, pin) { return apiClient.post('/auth/setup', { master_password: mp, pin: pin }); },
   login(pin) { return apiClient.post('/auth/login', { pin }); },
   changePin(masterPassword, newPin) { 
@@ -46,7 +45,6 @@ export default {
   
   sendHeartbeat() { return apiClient.post('/system/heartbeat'); },
 
-  // --- UPDATER API ---
   checkUpdates() { return apiClient.get('/system/updates/check'); },
   installUpdate() { return apiClient.post('/system/updates/install'); },
   restartApp() { return apiClient.post('/system/restart'); },
