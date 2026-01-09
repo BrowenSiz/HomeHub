@@ -42,13 +42,15 @@ def get_vault_media(skip: int = 0, limit: int = 100, db: Session = Depends(datab
 def upload_files(files: List[UploadFile] = File(...), db: Session = Depends(database.get_db)):
     settings.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     count = 0
+    new_ids = []
+    
     for file in files:
         try:
             file_path = settings.UPLOAD_DIR / file.filename
             if file_path.exists():
                 name = file_path.stem
                 ext = file_path.suffix
-                file_path = settings.UPLOAD_DIR / f"{name}_{int(os.time())}{ext}"
+                file_path = settings.UPLOAD_DIR / f"{name}_{int(time.time())}{ext}"
 
             with open(file_path, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
@@ -69,11 +71,14 @@ def upload_files(files: List[UploadFile] = File(...), db: Session = Depends(data
                 is_encrypted=False
             )
             db.add(new_media)
+            db.flush()
+            new_ids.append(new_media.id)
             count += 1
         except Exception:
             continue
+            
     db.commit()
-    return {"status": "success", "count": count}
+    return {"status": "success", "count": count, "ids": new_ids}
 
 @router.post("/scan")
 def trigger_scan(background_tasks: BackgroundTasks, db: Session = Depends(database.get_db)):

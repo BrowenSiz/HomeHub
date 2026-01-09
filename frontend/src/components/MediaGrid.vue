@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed } from 'vue'
+import { useElementSize, useScroll } from '@vueuse/core'
 import { PlayIcon, LockClosedIcon, FolderIcon, CheckCircleIcon, XMarkIcon, TrashIcon } from '@heroicons/vue/24/solid'
 import ContextMenu from './ContextMenu.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
@@ -16,6 +17,75 @@ const props = defineProps({
 const emit = defineEmits(['refresh', 'open-viewer'])
 const notify = useNotificationStore()
 const authStore = useAuthStore()
+
+const containerRef = ref(null)
+const { width: containerWidth, height: containerHeight } = useElementSize(containerRef)
+const { y: scrollTop } = useScroll(containerRef)
+
+const GAP = 16
+const PADDING_TOP = 40
+
+const rows = computed(() => {
+  const result = []
+  const cols = 10 - props.columns
+  for (let i = 0; i < props.items.length; i += cols) {
+    result.push(props.items.slice(i, i + cols))
+  }
+  return result
+})
+
+// 2. Вычисляем высоту одного ряда
+const rowHeight = computed(() => {
+  if (!containerWidth.value) return 200
+  const contentWidth = containerWidth.value - 80 
+  const cols = 10 - props.columns
+  return (contentWidth - (GAP * (cols - 1))) / cols
+})
+
+const visibleRowsRange = computed(() => {
+  const itemHeight = rowHeight.value + GAP
+  const buffer = 4
+  
+  const scrollY = Math.max(0, scrollTop.value - PADDING_TOP)
+  const startIndex = Math.floor(scrollY / itemHeight)
+  const visibleCount = Math.ceil(containerHeight.value / itemHeight)
+  
+  const start = Math.max(0, startIndex - buffer)
+  const end = Math.min(rows.value.length, startIndex + visibleCount + buffer)
+  
+  return { start, end }
+})
+
+const visibleRows = computed(() => {
+  const { start, end } = visibleRowsRange.value
+  return rows.value.slice(start, end).map((items, index) => ({
+    items,
+    rowIndex: start + index
+  }))
+})
+
+const spacerStyle = computed(() => {
+  const { start, end } = visibleRowsRange.value
+  const itemHeight = rowHeight.value + GAP
+  
+  const paddingTop = start * itemHeight
+  const paddingBottom = (rows.value.length - end) * itemHeight
+  
+  return {
+    paddingTop: `${paddingTop}px`,
+    paddingBottom: `${paddingBottom}px`
+  }
+})
+
+const rowGridStyle = computed(() => {
+  const cols = 10 - props.columns
+  return {
+    display: 'grid',
+    gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+    gap: `${GAP}px`,
+    marginBottom: `${GAP}px`
+  }
+})
 
 const contextMenu = ref({ isOpen: false, x: 0, y: 0, item: null })
 const deleteDialog = ref({ isOpen: false, item: null, isBulk: false })
@@ -113,21 +183,24 @@ const handleLock = async (ids) => {
     notify.show('Сейф закрыт! Введите PIN код.', 'error')
     return
   }
-
   try {
     await api.encryptMedia(ids)
-    notify.show(`Файлов перемещено: ${ids.length}`, 'success')
+    notify.show(`Перемещено в сейф: ${ids.length}`, 'success')
     emit('refresh')
     exitSelectionMode()
   } catch (e) {
-    notify.show('Ошибка доступа к сейфу', 'error')
+    if (e.response && e.response.status === 403) {
+      notify.show('Доступ запрещен. Сейф заблокирован.', 'error')
+    } else {
+      notify.show('Ошибка перемещения в сейф', 'error')
+    }
   }
 }
 
 const handleUnlock = async (ids) => {
   try {
     await api.decryptMedia(ids)
-    notify.show(`Файлов восстановлено: ${ids.length}`, 'success')
+    notify.show(`Восстановлено: ${ids.length}`, 'success')
     emit('refresh')
     exitSelectionMode()
   } catch (e) {
@@ -184,71 +257,73 @@ const handleAddToAlbum = async (albumId) => {
     albumDialog.value.isOpen = false
   }
 }
-
-const gridStyle = computed(() => {
-  const cols = (10 - props.columns) 
-  return {
-    gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`
-  }
-})
 </script>
 
 <template>
-  <div v-if="items.length === 0" class="flex flex-col items-center justify-center h-64 text-white/30">
-    <p>Нет медиафайлов</p>
-  </div>
-
   <div 
-    v-else 
-    class="grid gap-4 transition-all duration-500 ease-in-out w-full pb-32"
-    :style="gridStyle"
+    ref="containerRef" 
+    class="h-full w-full overflow-y-auto px-10 py-10 scroll-smooth custom-scrollbar relative pb-40"
   >
-    <div 
-      v-for="item in items" 
-      :key="item.id"
-      class="group aspect-square relative bg-white/5 rounded-2xl overflow-hidden cursor-pointer border hover:border-white/20 transition-all duration-200"
-      :class="selectedItems.has(item.id) ? 'border-blue-500 ring-2 ring-blue-500/50 scale-95' : 'hover:shadow-xl hover:scale-[1.02]'"
-      @click="handleClick(item)"
-      @contextmenu="handleContextMenu($event, item)"
-    >
-      <img 
-        :src="getThumbnailUrl(item)" 
-        class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110 opacity-90 group-hover:opacity-100"
-        loading="lazy"
-        @error="$event.target.src = '/assets/placeholder.png'"
-      />
-      
-      <div class="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-transparent opacity-60 group-hover:opacity-40 transition-opacity"></div>
+    <div v-if="items.length === 0" class="flex flex-col items-center justify-center h-64 text-white/30">
+      <p>Нет медиафайлов</p>
+    </div>
 
-      <div v-if="isSelectionMode" class="absolute top-3 right-3 z-30">
+    <div v-else :style="spacerStyle">
+      
+      <div 
+        v-for="row in visibleRows" 
+        :key="row.rowIndex"
+        :style="rowGridStyle"
+      >
         <div 
-          class="w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors bg-black/40 backdrop-blur-md"
-          :class="selectedItems.has(item.id) ? 'bg-blue-500 border-blue-500' : 'border-white/50'"
+          v-for="item in row.items" 
+          :key="item.id"
+          class="group aspect-square relative bg-white/5 rounded-2xl overflow-hidden cursor-pointer border hover:border-white/20 transition-all duration-200"
+          :class="selectedItems.has(item.id) ? 'border-blue-500 ring-2 ring-blue-500/50 scale-95' : 'border-white/5 hover:shadow-2xl hover:scale-[1.02]'"
+          @click="handleClick(item)"
+          @contextmenu="handleContextMenu($event, item)"
         >
-          <CheckCircleIcon v-if="selectedItems.has(item.id)" class="w-4 h-4 text-white" />
+          <img 
+            :src="getThumbnailUrl(item)" 
+            class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110 opacity-90 group-hover:opacity-100"
+            loading="lazy"
+            @error="$event.target.src = '/assets/placeholder.png'"
+          />
+          
+          <div class="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-transparent opacity-60 group-hover:opacity-40 transition-opacity"></div>
+
+          <div v-if="isSelectionMode" class="absolute top-3 right-3 z-30">
+            <div 
+              class="w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors bg-black/40 backdrop-blur-md"
+              :class="selectedItems.has(item.id) ? 'bg-blue-500 border-blue-500' : 'border-white/50'"
+            >
+              <CheckCircleIcon v-if="selectedItems.has(item.id)" class="w-4 h-4 text-white" />
+            </div>
+          </div>
+
+          <template v-else>
+            <div class="absolute top-2 left-2 flex flex-col gap-1.5 items-start max-w-[70%] z-20">
+              <div v-if="item.is_encrypted" class="w-6 h-6 bg-red-500/80 backdrop-blur-md rounded-lg flex items-center justify-center shadow-lg border border-white/10">
+                <LockClosedIcon class="w-3.5 h-3.5 text-white" />
+              </div>
+              <div v-if="item.album" class="flex items-center gap-1 px-2 py-1 bg-blue-600/80 backdrop-blur-md rounded-lg border border-white/10 shadow-lg">
+                <FolderIcon class="w-3 h-3 text-white/80" />
+                <span class="text-[10px] font-bold text-white truncate max-w-[80px]">{{ item.album.name }}</span>
+              </div>
+            </div>
+
+            <!-- Правый верх: Видео и Тип -->
+            <div class="absolute top-2 right-2 flex flex-col gap-1.5 items-end z-20">
+              <div v-if="item.media_type.startsWith('video')" class="w-8 h-8 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border border-white/20 shadow-lg">
+                <PlayIcon class="w-4 h-4 text-white fill-current" />
+              </div>
+              <div class="px-1.5 py-0.5 bg-black/40 backdrop-blur-md rounded text-[9px] font-bold text-white/70 uppercase tracking-wider border border-white/5">
+                {{ getFileExtension(item.filename) }}
+              </div>
+            </div>
+          </template>
         </div>
       </div>
-
-      <template v-else>
-        <div class="absolute top-2 left-2 flex flex-col gap-1.5 items-start max-w-[70%] z-20">
-          <div v-if="item.is_encrypted" class="w-6 h-6 bg-red-500/80 backdrop-blur-md rounded-lg flex items-center justify-center shadow-lg border border-white/10">
-            <LockClosedIcon class="w-3.5 h-3.5 text-white" />
-          </div>
-          <div v-if="item.album" class="flex items-center gap-1 px-2 py-1 bg-blue-600/80 backdrop-blur-md rounded-lg border border-white/10 shadow-lg">
-            <FolderIcon class="w-3 h-3 text-white/80" />
-            <span class="text-[10px] font-bold text-white truncate max-w-[80px]">{{ item.album.name }}</span>
-          </div>
-        </div>
-
-        <div class="absolute top-2 right-2 flex flex-col gap-1.5 items-end z-20">
-          <div v-if="item.media_type.startsWith('video')" class="w-8 h-8 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border border-white/20 shadow-lg">
-            <PlayIcon class="w-4 h-4 text-white fill-current" />
-          </div>
-          <div class="px-1.5 py-0.5 bg-black/40 backdrop-blur-md rounded text-[9px] font-bold text-white/70 uppercase tracking-wider border border-white/5">
-            {{ getFileExtension(item.filename) }}
-          </div>
-        </div>
-      </template>
     </div>
   </div>
 
@@ -260,24 +335,24 @@ const gridStyle = computed(() => {
           {{ selectedItems.size }} выбрано
         </div>
 
-        <button @click="handleBulkLock" class="action-btn text-white hover:bg-white/10 group" title="В сейф">
+        <button @click="handleBulkLock" class="action-btn text-white hover:bg-white/10 group" title="Переместить в сейф">
           <LockClosedIcon class="w-5 h-5 text-red-400 group-hover:scale-110 transition-transform" />
-          <span class="text-sm font-medium">В сейф</span>
+          <span class="text-xs font-medium text-white/80 group-hover:text-white">В сейф</span>
         </button>
 
-        <button @click="handleBulkAlbum" class="action-btn text-white hover:bg-white/10 group" title="В альбом">
+        <button @click="handleBulkAlbum" class="action-btn text-white hover:bg-white/10 group" title="Добавить в альбом">
           <FolderIcon class="w-5 h-5 text-blue-400 group-hover:scale-110 transition-transform" />
-          <span class="text-sm font-medium">В альбом</span>
+          <span class="text-xs font-medium text-white/80 group-hover:text-white">В альбом</span>
         </button>
 
-        <button @click="handleBulkDelete" class="action-btn text-white hover:bg-white/10 group" title="Удалить">
+        <button @click="handleBulkDelete" class="action-btn text-white hover:bg-white/10 group" title="Удалить выбранное">
           <TrashIcon class="w-5 h-5 text-white/70 group-hover:text-red-500 group-hover:scale-110 transition-transform" />
-          <span class="text-sm font-medium group-hover:text-red-400">Удалить</span>
+          <span class="text-xs font-medium text-white/80 group-hover:text-white">Удалить</span>
         </button>
 
         <div class="w-px h-6 bg-white/10 mx-2"></div>
 
-        <button @click="exitSelectionMode" class="p-2 hover:bg-white/10 rounded-xl text-white transition-colors">
+        <button @click="exitSelectionMode" class="p-2 hover:bg-white/10 rounded-xl text-white transition-colors" title="Отмена">
           <XMarkIcon class="w-5 h-5" />
         </button>
       </div>
@@ -310,7 +385,7 @@ const gridStyle = computed(() => {
 
 <style scoped>
 .action-btn {
-  @apply flex items-center gap-2 px-3 py-2 rounded-xl transition-all active:scale-95;
+  @apply flex flex-col items-center gap-1 px-3 py-2 rounded-xl transition-all active:scale-95;
 }
 
 .animate-slide-up {
