@@ -1,16 +1,17 @@
 <script setup>
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { 
-  LockClosedIcon, LockOpenIcon, TrashIcon, 
-  FolderPlusIcon, EyeIcon, CheckCircleIcon 
+  LockClosedIcon, 
+  LockOpenIcon, 
+  FolderIcon, 
+  TrashIcon, 
+  CheckCircleIcon
 } from '@heroicons/vue/24/outline'
 
 const props = defineProps({
-  visible: Boolean,
   x: Number,
   y: Number,
-  item: Object,
-  selectedCount: Number
+  item: Object
 })
 
 const emit = defineEmits(['close', 'action'])
@@ -22,78 +23,90 @@ const handleClickOutside = (e) => {
   }
 }
 
-watch(() => props.visible, (val) => {
-  if (val) setTimeout(() => document.addEventListener('click', handleClickOutside), 0)
-  else document.removeEventListener('click', handleClickOutside)
+onMounted(() => {
+  setTimeout(() => {
+    document.addEventListener('click', handleClickOutside)
+    document.addEventListener('contextmenu', handleClickOutside)
+  }, 50)
+  
+  document.body.style.overflow = 'hidden'
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', handleClickOutside)
+  document.removeEventListener('contextmenu', handleClickOutside)
+  document.body.style.overflow = ''
 })
 </script>
 
 <template>
-  <div 
-    v-if="visible"
-    ref="menuRef"
-    class="fixed z-[100] bg-[#1e1e20]/95 backdrop-blur-xl border border-white/10 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.6)] py-1.5 min-w-[220px] animate-scale-in origin-top-left overflow-hidden"
-    :style="{ top: `${y}px`, left: `${x}px` }"
-    @contextmenu.prevent
-  >
-    <!-- Header info -->
-    <div class="px-4 py-2 border-b border-white/5 mb-1">
-      <p class="text-xs font-bold text-gray-500 uppercase tracking-wider truncate">
-        {{ selectedCount > 0 ? `Выбрано: ${selectedCount}` : item?.filename }}
-      </p>
-    </div>
+  <div class="fixed inset-0 z-[99999] pointer-events-none">
+    <div 
+      ref="menuRef"
+      class="absolute min-w-[200px] bg-[#1e293b]/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl p-1.5 pointer-events-auto animate-scale-in origin-top-left"
+      :style="{ top: `${y}px`, left: `${x}px` }"
+    >
+      <div class="px-3 py-2 border-b border-white/5 mb-1">
+        <p class="text-[10px] font-bold text-white/40 uppercase tracking-wider truncate max-w-[160px]">
+          {{ item.filename }}
+        </p>
+      </div>
 
-    <!-- Actions -->
-    <div class="flex flex-col gap-0.5">
-      
-      <!-- Open (Only single) -->
-      <button v-if="selectedCount === 0" @click="$emit('action', 'open', item)" class="menu-item">
-        <EyeIcon class="w-4 h-4" />
-        <span>Открыть</span>
-      </button>
+      <div class="flex flex-col gap-0.5">
+        
+        <button 
+          @click="emit('action', 'select')"
+          class="flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-white hover:bg-white/10 transition-colors group text-left"
+        >
+          <CheckCircleIcon class="w-4 h-4 text-white/70 group-hover:text-white" />
+          Выбрать
+        </button>
 
-      <!-- Select -->
-      <button v-if="selectedCount === 0" @click="$emit('action', 'select', item)" class="menu-item">
-        <CheckCircleIcon class="w-4 h-4" />
-        <span>Выбрать</span>
-      </button>
+        <div class="h-px bg-white/5 my-1"></div>
 
-      <div class="h-px bg-white/10 my-1 mx-2"></div>
+        <button 
+          v-if="!item.is_encrypted"
+          @click="emit('action', 'lock')"
+          class="flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-white hover:bg-white/10 transition-colors group text-left"
+        >
+          <LockClosedIcon class="w-4 h-4 text-red-400 group-hover:scale-110 transition-transform" />
+          В сейф
+        </button>
 
-      <!-- Add to Album -->
-      <button @click="$emit('action', 'add-to-album', item)" class="menu-item">
-        <FolderPlusIcon class="w-4 h-4" />
-        <span>Добавить в альбом...</span>
-      </button>
+        <button 
+          v-else
+          @click="emit('action', 'unlock')"
+          class="flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-white hover:bg-white/10 transition-colors group text-left"
+        >
+          <LockOpenIcon class="w-4 h-4 text-green-400 group-hover:scale-110 transition-transform" />
+          Восстановить
+        </button>
 
-      <!-- Encrypt / Decrypt -->
-      <button v-if="!item?.is_encrypted" @click="$emit('action', 'encrypt', item)" class="menu-item text-blue-400 hover:text-blue-300">
-        <LockClosedIcon class="w-4 h-4" />
-        <span>Переместить в Сейф</span>
-      </button>
-      
-      <button v-else @click="$emit('action', 'decrypt', item)" class="menu-item text-green-400 hover:text-green-300">
-        <LockOpenIcon class="w-4 h-4" />
-        <span>Восстановить из Сейфа</span>
-      </button>
+        <button 
+          @click="emit('action', 'album')"
+          class="flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-white hover:bg-white/10 transition-colors group text-left"
+        >
+          <FolderIcon class="w-4 h-4 text-blue-400 group-hover:scale-110 transition-transform" />
+          В альбом
+        </button>
 
-      <div class="h-px bg-white/10 my-1 mx-2"></div>
+        <div class="h-px bg-white/5 my-1"></div>
 
-      <!-- Delete -->
-      <button @click="$emit('action', 'delete', item)" class="menu-item text-red-400 hover:bg-red-500/10 hover:text-red-300">
-        <TrashIcon class="w-4 h-4" />
-        <span>Удалить</span>
-      </button>
+        <button 
+          @click="emit('action', 'delete')"
+          class="flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium text-red-400 hover:bg-red-500/10 transition-colors group text-left"
+        >
+          <TrashIcon class="w-4 h-4 group-hover:scale-110 transition-transform" />
+          Удалить
+        </button>
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.menu-item {
-  @apply flex items-center gap-3 px-4 py-2 text-sm text-gray-300 hover:bg-white/10 hover:text-white transition-colors w-full text-left;
-}
 .animate-scale-in {
-  animation: scaleIn 0.1s ease-out;
+  animation: scaleIn 0.1s cubic-bezier(0.16, 1, 0.3, 1);
 }
 @keyframes scaleIn {
   from { opacity: 0; transform: scale(0.95); }

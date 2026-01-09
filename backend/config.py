@@ -21,7 +21,7 @@ class Settings:
         self.ALGORITHM = "HS256"
         self.ACCESS_TOKEN_EXPIRE_MINUTES = 30
         
-        self.VERSION = "1.1.0"
+        self.VERSION = "1.2.0"
         self.GITHUB_REPO_OWNER = "BrowenSiz"
         self.GITHUB_REPO_NAME = "HomeHub"
 

@@ -20,6 +20,10 @@ import SystemStats from '@/components/SystemStats.vue'
 const authStore = useAuthStore()
 const notify = useNotificationStore()
 
+const gridSize = ref(5)      
+const filterType = ref('all') 
+const logoError = ref(false)
+
 const status = ref('Запуск...')
 const apiInfo = ref(null)
 const isSetupComplete = ref(false)
@@ -37,9 +41,23 @@ const isUploading = ref(false)
 
 const viewerOpen = ref(false)
 const currentMediaIndex = ref(0)
-const activeItem = computed(() => mediaItems.value[currentMediaIndex.value] || null)
-const nextItem = computed(() => mediaItems.value[currentMediaIndex.value + 1] || null)
-const prevItem = computed(() => mediaItems.value[currentMediaIndex.value - 1] || null)
+
+const filteredMediaItems = computed(() => {
+  if (filterType.value === 'all') return mediaItems.value
+  
+  return mediaItems.value.filter(item => {
+    if (filterType.value === 'photo') {
+      return item.media_type.startsWith('image/')
+    } else if (filterType.value === 'video') {
+      return item.media_type.startsWith('video/')
+    }
+    return true
+  })
+})
+
+const activeItem = computed(() => filteredMediaItems.value[currentMediaIndex.value] || null)
+const nextItem = computed(() => filteredMediaItems.value[currentMediaIndex.value + 1] || null)
+const prevItem = computed(() => filteredMediaItems.value[currentMediaIndex.value - 1] || null)
 
 const fileInputRef = ref(null)
 let heartbeatInterval = null
@@ -58,10 +76,11 @@ const pageTitle = computed(() => {
 
 const pageSubtitle = computed(() => {
   switch (currentView.value) {
-    case 'library': return `Все медиафайлы • ${mediaItems.value.length} объектов`
+    case 'library': 
+      return `Медиафайлы • ${filteredMediaItems.value.length} шт.`
     case 'albums': return 'Ваши коллекции'
     case 'album_detail': return activeAlbum.value?.description || 'Просмотр содержимого'
-    case 'vault': return authStore.isVaultUnlocked ? 'Зашифрованное хранилище' : 'Доступ ограничен'
+    case 'vault': return authStore.isVaultUnlocked ? `${filteredMediaItems.value.length} защищенных файлов` : 'Доступ ограничен'
     case 'system': return 'Статистика и ресурсы'
     case 'settings': return 'Безопасность и обновления'
     default: return ''
@@ -127,6 +146,7 @@ const loadData = async () => {
 const changeView = (viewId) => {
   currentView.value = viewId
   activeAlbum.value = null
+  filterType.value = 'all'
   if (viewId === 'vault' && !authStore.isVaultUnlocked) {
     mediaItems.value = []
   } else {
@@ -140,10 +160,10 @@ const handleDeleteAlbum = async (id) => { await api.deleteAlbum(id); loadData() 
 
 const onSetupFinished = async () => { isSetupComplete.value = true; await loadData() }
 const openViewer = (item) => {
-  const index = mediaItems.value.findIndex(i => i.id === item.id)
+  const index = filteredMediaItems.value.findIndex(i => i.id === item.id)
   if (index !== -1) { currentMediaIndex.value = index; viewerOpen.value = true }
 }
-const nextMedia = () => { if (currentMediaIndex.value < mediaItems.value.length - 1) currentMediaIndex.value++ }
+const nextMedia = () => { if (currentMediaIndex.value < filteredMediaItems.value.length - 1) currentMediaIndex.value++ }
 const prevMedia = () => { if (currentMediaIndex.value > 0) currentMediaIndex.value-- }
 
 const handleAddPhoto = () => { if (fileInputRef.value) fileInputRef.value.click() }
@@ -182,7 +202,6 @@ onUnmounted(() => {
 <template>
   <div class="h-screen w-full flex p-5 gap-5 overflow-hidden relative selection:bg-blue-500 selection:text-white font-sans bg-[#0f172a]">
     
-    <!-- Фоновые пятна -->
     <div class="fixed top-[-20%] left-[-10%] w-[50%] h-[50%] bg-blue-600/10 rounded-full blur-[120px] pointer-events-none"></div>
     <div class="fixed bottom-[-20%] right-[-10%] w-[50%] h-[50%] bg-purple-600/10 rounded-full blur-[120px] pointer-events-none"></div>
 
@@ -190,9 +209,8 @@ onUnmounted(() => {
     <input type="file" ref="fileInputRef" class="hidden" multiple accept="image/*,video/*,.cr2,.nef,.dng" @change="onFileChange" />
     
     <CreateAlbumModal :isOpen="isCreateAlbumOpen" @close="isCreateAlbumOpen = false" @create="handleCreateAlbum" />
-    <MediaViewer :isOpen="viewerOpen" :item="activeItem" :nextItem="nextItem" :prevItem="prevItem" :hasNext="currentMediaIndex < mediaItems.length - 1" :hasPrev="currentMediaIndex > 0" @close="viewerOpen = false" @next="nextMedia" @prev="prevMedia" />
+    <MediaViewer :isOpen="viewerOpen" :item="activeItem" :nextItem="nextItem" :prevItem="prevItem" :hasNext="currentMediaIndex < filteredMediaItems.length - 1" :hasPrev="currentMediaIndex > 0" @close="viewerOpen = false" @next="nextMedia" @prev="prevMedia" />
     
-    <!-- LOADING -->
     <div v-if="checkingAuth" class="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#0f172a] text-white gap-6">
         <div class="relative w-16 h-16">
           <div class="absolute inset-0 border-4 border-blue-500/20 rounded-full"></div>
@@ -201,25 +219,32 @@ onUnmounted(() => {
         <div class="text-white/40 text-sm uppercase tracking-[0.2em] animate-pulse">Запуск системы</div>
     </div>
 
-    <!-- ERROR -->
     <div v-else-if="status === 'Офлайн'" class="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/90 text-white gap-6">
        <div class="text-3xl font-bold text-red-500">Система недоступна</div>
        <p class="text-white/50">Сервер не отвечает на запросы</p>
        <button @click="initSystem(0)" class="px-8 py-3 bg-white/10 hover:bg-white/20 border border-white/10 rounded-xl transition-all">Повторить попытку</button>
     </div>
 
-    <!-- WIZARD -->
     <SetupWizard v-else-if="!isSetupComplete" @setup-complete="onSetupFinished" />
 
-    <!-- MAIN UI -->
     <template v-else>
       <div class="w-72 flex flex-col gap-5 shrink-0 z-10">
         <div class="h-20 glass-panel rounded-[2rem] flex items-center px-6 gap-5 relative overflow-hidden group">
            <div class="absolute inset-0 bg-gradient-to-r from-blue-600/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
            
-           <div class="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/20 border border-white/20 z-10">
-            <span class="text-white font-black text-xl">H</span>
+           <div class="w-10 h-10 rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/20 border border-white/20 z-10 overflow-hidden relative">
+             <img 
+               v-if="!logoError"
+               src="/logo.png" 
+               alt="Logo" 
+               class="w-full h-full object-contain" 
+               @error="logoError = true"
+             />
+             <div v-else class="w-full h-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center">
+               <span class="text-white font-black text-xl">H</span>
+             </div>
           </div>
+          
           <div class="z-10">
             <h1 class="font-bold text-xl tracking-tight text-white leading-none">HomeHub</h1>
             <span class="text-[10px] uppercase font-bold text-white/30 tracking-[0.2em] mt-0.5 block">
@@ -227,7 +252,6 @@ onUnmounted(() => {
             </span>
           </div>
         </div>
-        <!-- Меню -->
         <Sidebar :currentView="currentView" @change-view="changeView" class="flex-1" />
       </div>
 
@@ -239,6 +263,11 @@ onUnmounted(() => {
           :subtitle="pageSubtitle"
           :showBack="currentView === 'album_detail'"
           :showLock="currentView === 'vault' && authStore.isVaultUnlocked"
+          
+          :showTools="currentView === 'library' || currentView === 'album_detail' || (currentView === 'vault' && authStore.isVaultUnlocked)"
+          v-model:gridSize="gridSize"
+          v-model:filterType="filterType"
+
           @back="changeView('albums')"
           @lock="authStore.lockVault()"
         />
@@ -248,7 +277,7 @@ onUnmounted(() => {
           <div class="flex-1 overflow-y-auto px-8 py-8 scroll-smooth custom-scrollbar relative">
             <div v-if="currentView === 'library' || currentView === 'album_detail'">
               <div v-if="isLoading" class="loader"></div>
-              <MediaGrid v-else :items="mediaItems" @refresh="loadData" @open-viewer="openViewer" />
+              <MediaGrid v-else :items="filteredMediaItems" :columns="gridSize" @refresh="loadData" @open-viewer="openViewer" />
             </div>
             
             <div v-else-if="currentView === 'albums'">
@@ -260,8 +289,10 @@ onUnmounted(() => {
               <PinPad v-if="!authStore.isVaultUnlocked" :error="pinError" :loading="pinLoading" @submit="handlePinSubmit" />
               <div v-else class="flex flex-col h-full">
                 <div v-if="isLoading" class="loader border-red-500"></div>
-                <div v-else-if="mediaItems.length > 0" class="flex-1"><MediaGrid :items="mediaItems" @refresh="loadData" @open-viewer="openViewer" /></div>
-                <div v-else class="empty-state"><div class="text-6xl mb-6 opacity-20 blur-sm">🔒</div><p class="text-2xl font-bold text-white/40">Сейф пуст</p></div>
+                <div v-else-if="filteredMediaItems.length > 0" class="flex-1">
+                  <MediaGrid :items="filteredMediaItems" :columns="gridSize" @refresh="loadData" @open-viewer="openViewer" />
+                </div>
+                <div v-else class="empty-state"><div class="text-6xl mb-6 opacity-20 blur-sm">🔒</div><p class="text-2xl font-bold text-white/40">Здесь пусто</p></div>
               </div>
             </div>
             

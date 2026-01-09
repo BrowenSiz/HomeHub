@@ -1,89 +1,145 @@
-from PIL import Image
 import os
 import io
+from PIL import Image, ImageOps
+import cv2
 from pathlib import Path
 from ..config import settings
-from ..database import models
 
+# --- Подключаем поддержку HEIC ---
 try:
-    import cv2
-    HAS_CV2 = True
+    import pillow_heif
+    pillow_heif.register_heif_opener()
+    HAS_HEIF = True
 except ImportError:
-    HAS_CV2 = False
+    HAS_HEIF = False
+    print("Warning: pillow-heif not installed. HEIC support disabled.")
 
-def generate_thumbnail(media: models.Media) -> Path:
-    source_path = settings.UPLOAD_DIR / Path(media.original_path).name
+# --- Подключаем поддержку RAW ---
+try:
+    import rawpy
+    HAS_RAW = True
+except ImportError:
+    HAS_RAW = False
+    print("Warning: rawpy not installed. Advanced RAW support disabled.")
+
+def generate_thumbnail(media_item, _unused=None) -> str:
+    if not media_item.original_path:
+        return None
+        
+    thumb_filename = f"thumb_{media_item.id}.jpg"
+    thumb_path = settings.THUMBNAIL_DIR / thumb_filename
+    
+    if thumb_path.exists():
+        return thumb_filename
+        
+    filename = Path(media_item.original_path).name
+    if media_item.is_encrypted:
+        source_path = settings.VAULT_DIR / filename
+    else:
+        source_path = settings.UPLOAD_DIR / media_item.original_path
+    
     if not source_path.exists():
         return None
-
-    target_name = f"thumb_{media.id}.jpg"
-    target_path = settings.THUMBNAIL_DIR / target_name
     
-    settings.THUMBNAIL_DIR.mkdir(parents=True, exist_ok=True)
-
     try:
-        if "video" in media.media_type:
-            return _generate_video_thumbnail_file(source_path, target_path)
-        else:
-            return _generate_image_thumbnail_file(source_path, target_path)
+        img = None
+        
+        if media_item.media_type and media_item.media_type.startswith('video/'):
+            img = _extract_video_frame(source_path)
+
+        if img is None:
+            img = _load_image_robust(source_path)
+
+        if img is None:
+            return None
+
+        try: img = ImageOps.exif_transpose(img)
+        except Exception: pass
+
+        if img.mode in ("RGBA", "P", "CMYK"): 
+            img = img.convert("RGB")
+            
+        img.thumbnail((400, 400), Image.Resampling.LANCZOS)
+        img.save(thumb_path, "JPEG", quality=85)
+        
+        return thumb_filename
+
     except Exception as e:
-        print(f"Thumbnail generation error for {media.id}: {e}")
+        print(f"Thumb error for {media_item.id}: {e}")
         return None
 
 def generate_memory_thumbnail(file_path: Path, media_type: str) -> bytes:
     try:
-        if "video" in media_type:
-            return _generate_video_thumbnail_bytes(file_path)
+        img = None
+        if media_type and media_type.startswith('video/'):
+            img = _extract_video_frame(file_path)
         else:
-            return _generate_image_thumbnail_bytes(file_path)
+            img = _load_image_robust(file_path)
+            
+        if img:
+            try: img = ImageOps.exif_transpose(img)
+            except: pass
+            if img.mode != "RGB": img = img.convert("RGB")
+            
+            img.thumbnail((400, 400), Image.Resampling.LANCZOS)
+            output = io.BytesIO()
+            img.save(output, format="JPEG", quality=80)
+            return output.getvalue()
     except Exception as e:
-        print(f"Memory thumbnail error: {e}")
-        return None
-
-def _generate_image_thumbnail_file(source: Path, target: Path) -> Path:
-    with Image.open(source) as img:
-        img.thumbnail((300, 300))
-        if img.mode in ("RGBA", "P"): 
-            img = img.convert("RGB")
-        img.save(target, "JPEG", quality=80)
-    return target
-
-def _generate_video_thumbnail_file(source: Path, target: Path) -> Path:
-    if not HAS_CV2: return None
-    
-    cap = cv2.VideoCapture(str(source))
-    success, frame = cap.read()
-    cap.release()
-    
-    if success:
-        img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-        img.thumbnail((300, 300))
-        img.save(target, "JPEG", quality=80)
-        return target
+        print(f"Memory thumb error: {e}")
     return None
 
-def _generate_image_thumbnail_bytes(source: Path) -> bytes:
-    with Image.open(source) as img:
-        img.thumbnail((300, 300))
-        if img.mode in ("RGBA", "P"): 
-            img = img.convert("RGB")
-        
-        output = io.BytesIO()
-        img.save(output, format="JPEG", quality=80)
-        return output.getvalue()
+def convert_image_to_jpeg_bytes(file_path: Path) -> bytes:
+    try:
+        img = _load_image_robust(file_path)
+        if img:
+            try: img = ImageOps.exif_transpose(img)
+            except: pass
+            if img.mode != "RGB": img = img.convert("RGB")
+            
+            output = io.BytesIO()
+            img.save(output, format="JPEG", quality=90) 
+            return output.getvalue()
+    except Exception as e:
+        print(f"Conversion error: {e}")
+    return None
 
-def _generate_video_thumbnail_bytes(source: Path) -> bytes:
-    if not HAS_CV2: return None
+# --- Helpers ---
 
-    cap = cv2.VideoCapture(str(source))
-    success, frame = cap.read()
-    cap.release()
+def _extract_video_frame(path: Path):
+    try:
+        cap = cv2.VideoCapture(str(path))
+        if cap.isOpened():
+            cap.set(cv2.CAP_PROP_POS_MSEC, 1000)
+            ret, frame = cap.read()
+            if not ret:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                ret, frame = cap.read()
+            cap.release()
+            if ret:
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                return Image.fromarray(frame_rgb)
+    except Exception:
+        pass
+    return None
 
-    if success:
-        img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-        img.thumbnail((300, 300))
-        
-        output = io.BytesIO()
-        img.save(output, format="JPEG", quality=80)
-        return output.getvalue()
+def _load_image_robust(path: Path):
+    str_path = str(path)
+    ext = path.suffix.lower()
+
+    if HAS_RAW and ext in ['.cr2', '.nef', '.dng', '.arw', '.orf', '.rw2']:
+        try:
+            with rawpy.imread(str_path) as raw:
+                rgb = raw.postprocess(use_camera_wb=True)
+                return Image.fromarray(rgb)
+        except Exception as e:
+            print(f"Rawpy failed for {path}: {e}, trying Pillow")
+
+    try:
+        img = Image.open(path)
+        img.load() # Force load
+        return img
+    except Exception as e:
+        print(f"Pillow load failed for {path}: {e}")
+    
     return None

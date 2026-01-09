@@ -16,6 +16,8 @@ from ..runtime import vault_state
 
 router = APIRouter(prefix="/api/media", tags=["media"])
 
+WEB_NATIVE_FORMATS = {'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml'}
+
 def get_media_item(db: Session, media_id: int):
     media = db.query(models.Media).options(joinedload(models.Media.album)).filter(models.Media.id == media_id).first()
     if not media:
@@ -46,7 +48,7 @@ def upload_files(files: List[UploadFile] = File(...), db: Session = Depends(data
             if file_path.exists():
                 name = file_path.stem
                 ext = file_path.suffix
-                file_path = settings.UPLOAD_DIR / f"{name}_{int(time.time())}{ext}"
+                file_path = settings.UPLOAD_DIR / f"{name}_{int(os.time())}{ext}"
 
             with open(file_path, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
@@ -54,6 +56,10 @@ def upload_files(files: List[UploadFile] = File(...), db: Session = Depends(data
             mime_type, _ = mimetypes.guess_type(file_path)
             if not mime_type: mime_type = "application/octet-stream"
             
+            ext = file_path.suffix.lower()
+            if ext in ['.heic', '.heif']: mime_type = "image/heic"
+            if ext in ['.cr2', '.nef', '.dng']: mime_type = f"image/x-{ext.lstrip('.')}"
+
             stat = os.stat(file_path)
             new_media = models.Media(
                 filename=file_path.name,
@@ -82,22 +88,47 @@ def get_media_content(media_id: int, db: Session = Depends(database.get_db)):
     if media.is_encrypted:
         if key is None:
             raise HTTPException(status_code=403, detail="Vault locked")
-        file_path = settings.VAULT_DIR / Path(media.original_path).name
-        
-        if not file_path.exists():
-             raise HTTPException(status_code=404, detail="Encrypted file not found")
-        
+        filename = Path(media.original_path).name 
+        file_path = settings.VAULT_DIR / filename
+    else:
+        file_path = settings.UPLOAD_DIR / media.original_path
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found on disk")
+
+    # --- ЛОГИКА КОНВЕРТАЦИИ ---
+    needs_conversion = media.media_type.startswith('image/') and media.media_type not in WEB_NATIVE_FORMATS
+    
+    if needs_conversion:
+        if media.is_encrypted:
+            try:
+                with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                    temp_path = Path(tmp.name)
+                
+                crypto_utils.decrypt_file_to_disk(file_path, temp_path, key)
+                
+                jpeg_bytes = thumbnail.convert_image_to_jpeg_bytes(temp_path)
+                
+                if temp_path.exists(): os.unlink(temp_path)
+                
+                if jpeg_bytes:
+                    return StreamingResponse(io.BytesIO(jpeg_bytes), media_type="image/jpeg")
+            except Exception as e:
+                if 'temp_path' in locals() and temp_path.exists(): os.unlink(temp_path)
+                print(f"Secure convert error: {e}")
+                
+        else:
+            jpeg_bytes = thumbnail.convert_image_to_jpeg_bytes(file_path)
+            if jpeg_bytes:
+                return StreamingResponse(io.BytesIO(jpeg_bytes), media_type="image/jpeg")
+
+    if media.is_encrypted:
         return StreamingResponse(
             crypto_utils.decrypt_file_generator(file_path, key),
             media_type=media.media_type
         )
     else:
-        file_path = settings.UPLOAD_DIR / Path(media.original_path).name
-
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="File not found on disk")
-
-    return FileResponse(file_path, media_type=media.media_type)
+        return FileResponse(file_path, media_type=media.media_type)
 
 @router.get("/{media_id}/thumbnail")
 def get_media_thumbnail(media_id: int, db: Session = Depends(database.get_db)):
@@ -108,40 +139,40 @@ def get_media_thumbnail(media_id: int, db: Session = Depends(database.get_db)):
         if key is None:
             raise HTTPException(status_code=403, detail="Vault locked")
             
-        vault_path = settings.VAULT_DIR / Path(media.original_path).name
+        vault_filename = Path(media.original_path).name
+        vault_path = settings.VAULT_DIR / vault_filename
+        
         if not vault_path.exists():
             raise HTTPException(status_code=404, detail="Encrypted file missing")
 
-        # Генерируем превью в RAM
         try:
             with tempfile.NamedTemporaryFile(delete=False) as tmp:
                 temp_path = Path(tmp.name)
             
             crypto_utils.decrypt_file_to_disk(vault_path, temp_path, key)
-            
             thumb_bytes = thumbnail.generate_memory_thumbnail(temp_path, media.media_type)
             
-            if temp_path.exists():
-                os.unlink(temp_path)
+            if temp_path.exists(): os.unlink(temp_path)
 
             if thumb_bytes:
                 return StreamingResponse(io.BytesIO(thumb_bytes), media_type="image/jpeg")
             else:
                 raise HTTPException(status_code=404, detail="Could not generate thumbnail")
                 
-        except Exception as e:
-            if 'temp_path' in locals() and temp_path.exists():
-                os.unlink(temp_path)
-            print(f"Secure thumbnail error: {e}")
+        except Exception:
+            if 'temp_path' in locals() and temp_path.exists(): os.unlink(temp_path)
             raise HTTPException(status_code=500, detail="Thumbnail generation failed")
 
-    thumb_path_str = media.thumbnail_path or f"thumb_{media.id}.jpg"
+    thumb_path_str = media.thumbnail_path
+    if not thumb_path_str:
+         thumb_path_str = f"thumb_{media.id}.jpg"
+
     thumb_path = settings.THUMBNAIL_DIR / thumb_path_str
     
     if not thumb_path.exists():
-        new_path = thumbnail.generate_thumbnail(media)
-        if new_path:
-            return FileResponse(new_path, media_type="image/jpeg")
+        new_name = thumbnail.generate_thumbnail(media)
+        if new_name:
+            return FileResponse(settings.THUMBNAIL_DIR / new_name, media_type="image/jpeg")
         raise HTTPException(status_code=404, detail="Thumbnail not found")
         
     return FileResponse(thumb_path, media_type="image/jpeg")
@@ -156,30 +187,26 @@ def bulk_encrypt(ids: List[int], db: Session = Depends(database.get_db)):
     for mid in ids:
         media = db.query(models.Media).filter(models.Media.id == mid).first()
         if media and not media.is_encrypted:
-            filename = Path(media.original_path).name
-            source_path = settings.UPLOAD_DIR / filename
+            source_path = settings.UPLOAD_DIR / media.original_path
+            
+            filename = source_path.name
             dest_path = settings.VAULT_DIR / filename
             
             if source_path.exists():
                 try:
-                    # 1. Шифруем
                     crypto_utils.encrypt_file(source_path, dest_path, key)
                     
                     if dest_path.exists() and dest_path.stat().st_size > 0:
-                        # 2. Удаляем оригинал
                         os.remove(source_path)
                         
-                        # 3. УДАЛЯЕМ МИНИАТЮРУ
-                        thumb_name = media.thumbnail_path or f"thumb_{media.id}.jpg"
-                        thumb_path = settings.THUMBNAIL_DIR / thumb_name
-                        if thumb_path.exists():
-                            try:
-                                os.remove(thumb_path)
-                            except Exception as e:
-                                print(f"Failed to delete thumbnail {thumb_name}: {e}")
+                        if media.thumbnail_path:
+                            thumb_path = settings.THUMBNAIL_DIR / media.thumbnail_path
+                            if thumb_path.exists():
+                                try: os.remove(thumb_path)
+                                except: pass
                             
                         media.is_encrypted = True
-                        media.original_path = filename
+                        media.original_path = filename 
                         encrypted_count += 1
                     else:
                         if dest_path.exists(): os.remove(dest_path)
@@ -202,6 +229,7 @@ def bulk_decrypt(ids: List[int], db: Session = Depends(database.get_db)):
         if media and media.is_encrypted:
             filename = Path(media.original_path).name
             source_path = settings.VAULT_DIR / filename
+            
             dest_path = settings.UPLOAD_DIR / filename
             
             if source_path.exists():
@@ -211,6 +239,7 @@ def bulk_decrypt(ids: List[int], db: Session = Depends(database.get_db)):
                     if dest_path.exists() and dest_path.stat().st_size > 0:
                         os.remove(source_path)
                         media.is_encrypted = False
+                        media.original_path = filename
                         decrypted_count += 1
                     else:
                          if dest_path.exists(): os.remove(dest_path)
@@ -227,13 +256,17 @@ def bulk_delete(ids: List[int], db: Session = Depends(database.get_db)):
         media = db.query(models.Media).filter(models.Media.id == mid).first()
         if media:
             try:
-                filename = Path(media.original_path).name
-                file_path = (settings.VAULT_DIR if media.is_encrypted else settings.UPLOAD_DIR) / filename
+                if media.is_encrypted:
+                    filename = Path(media.original_path).name
+                    file_path = settings.VAULT_DIR / filename
+                else:
+                    file_path = settings.UPLOAD_DIR / media.original_path
+                
                 if file_path.exists(): os.remove(file_path)
                 
-                thumb_str = media.thumbnail_path or f"thumb_{media.id}.jpg"
-                thumb_path = settings.THUMBNAIL_DIR / thumb_str
-                if thumb_path.exists(): os.remove(thumb_path)
+                if media.thumbnail_path:
+                    thumb_path = settings.THUMBNAIL_DIR / media.thumbnail_path
+                    if thumb_path.exists(): os.remove(thumb_path)
             except Exception:
                 pass
             db.delete(media)

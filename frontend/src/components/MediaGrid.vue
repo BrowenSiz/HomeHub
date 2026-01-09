@@ -1,302 +1,323 @@
 <script setup>
 import { ref, computed } from 'vue'
-import { 
-  PlayCircleIcon, 
-  LockClosedIcon, LockOpenIcon, TrashIcon, FolderPlusIcon, XMarkIcon
-} from '@heroicons/vue/24/outline'
-import { CheckCircleIcon as CheckCircleSolid } from '@heroicons/vue/24/solid'
+import { PlayIcon, LockClosedIcon, FolderIcon, CheckCircleIcon, XMarkIcon, TrashIcon } from '@heroicons/vue/24/solid'
 import ContextMenu from './ContextMenu.vue'
-import AlbumSelectorModal from './AlbumSelectorModal.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
+import AlbumSelectorModal from './AlbumSelectorModal.vue'
 import api from '@/services/api'
-import { useAuthStore } from '@/stores/auth'
 import { useNotificationStore } from '@/stores/notification'
+import { useAuthStore } from '@/stores/auth'
 
-const props = defineProps({ items: { type: Array, required: true } })
+const props = defineProps({
+  items: { type: Array, required: true },
+  columns: { type: Number, default: 5 }
+})
+
 const emit = defineEmits(['refresh', 'open-viewer'])
-const authStore = useAuthStore()
 const notify = useNotificationStore()
+const authStore = useAuthStore()
 
-// State
-const selectedIds = ref(new Set())
-const isSelectionMode = computed(() => selectedIds.value.size > 0)
+const contextMenu = ref({ isOpen: false, x: 0, y: 0, item: null })
+const deleteDialog = ref({ isOpen: false, item: null, isBulk: false })
+const albumDialog = ref({ isOpen: false, item: null, isBulk: false })
 
-// Context Menu State
-const menuVisible = ref(false)
-const menuX = ref(0)
-const menuY = ref(0)
-const activeItem = ref(null) // Элемент под курсором при вызове меню
+const isSelectionMode = ref(false)
+const selectedItems = ref(new Set())
 
-// Modals State
-const showConfirm = ref(false)
-const confirmAction = ref(null)
-const showAlbumSelector = ref(false)
+const getThumbnailUrl = (item) => {
+  if (item.is_encrypted) return `/api/media/${item.id}/thumbnail`
+  return item.thumbnail_path 
+    ? `/thumbnails/${item.thumbnail_path}`
+    : `/api/media/${item.id}/thumbnail`
+}
 
-const isSelected = (id) => selectedIds.value.has(id)
-const isVideo = (item) => item.media_type && item.media_type.startsWith('video/')
-const getFileExtension = (filename) => filename.split('.').pop().toUpperCase().slice(0, 4)
+const getFileExtension = (filename) => {
+  if (!filename) return ''
+  return filename.split('.').pop().toUpperCase()
+}
 
-// --- MOUSE INTERACTIONS ---
-
-const handleLeftClick = (event, item) => {
-  // 1. Ctrl/Cmd Click -> Toggle Selection
-  if (event.ctrlKey || event.metaKey) {
-    toggleSelection(item.id)
-    return
+const toggleSelection = (item) => {
+  if (selectedItems.value.has(item.id)) {
+    selectedItems.value.delete(item.id)
+    if (selectedItems.value.size === 0) isSelectionMode.value = false
+  } else {
+    selectedItems.value.add(item.id)
   }
-  
-  // 2. Shift Click (Range) - Simplified
-  if (event.shiftKey && isSelectionMode.value) {
-    toggleSelection(item.id)
-    return
-  }
+}
 
-  // 3. Selection Mode -> Toggle
+const exitSelectionMode = () => {
+  isSelectionMode.value = false
+  selectedItems.value.clear()
+}
+
+const handleClick = (item) => {
   if (isSelectionMode.value) {
-    toggleSelection(item.id)
-  } 
-  // 4. Normal Mode -> Open Viewer
-  else {
+    toggleSelection(item)
+  } else {
     emit('open-viewer', item)
   }
 }
 
-const handleRightClick = (event, item) => {
-  event.preventDefault() // Предотвращаем нативное меню
+const handleContextMenu = (e, item) => {
+  if (isSelectionMode.value) return
   
-  // Логика: Если кликаем по файлу, который УЖЕ выбран -> меню для всей группы
-  // Если кликаем по невыбранному -> меню только для него (но не выбираем его визуально сразу)
-  if (!selectedIds.value.has(item.id)) {
-    activeItem.value = item
-  } else {
-    // Если кликнули по уже выбранному, то активный элемент - это он, но действие будет для всех
-    activeItem.value = item
+  e.preventDefault()
+  e.stopPropagation()
+  
+  let x = e.clientX
+  let y = e.clientY
+  
+  if (x > window.innerWidth - 220) x = window.innerWidth - 220
+  if (y > window.innerHeight - 300) y = window.innerHeight - 300
+
+  contextMenu.value = { isOpen: true, x, y, item }
+}
+
+const handleAction = (action) => {
+  const item = contextMenu.value.item
+  contextMenu.value.isOpen = false
+  
+  if (!item && action !== 'select' && action !== 'bulk') return
+
+  switch (action) {
+    case 'select':
+      isSelectionMode.value = true
+      selectedItems.value.add(item.id)
+      break
+    case 'lock':
+      handleLock([item.id])
+      break
+    case 'unlock':
+      handleUnlock([item.id])
+      break
+    case 'album':
+      albumDialog.value = { isOpen: true, item: item, isBulk: false }
+      break
+    case 'delete':
+      deleteDialog.value = { isOpen: true, item: item, isBulk: false }
+      break
   }
-
-  // Позиционирование (прямо под курсором)
-  menuX.value = event.clientX
-  menuY.value = event.clientY
-  menuVisible.value = true
 }
 
-const toggleSelection = (id) => {
-  if (selectedIds.value.has(id)) selectedIds.value.delete(id)
-  else selectedIds.value.add(id)
+const handleBulkLock = () => handleLock(Array.from(selectedItems.value))
+const handleBulkUnlock = () => handleUnlock(Array.from(selectedItems.value))
+const handleBulkDelete = () => {
+  deleteDialog.value = { isOpen: true, item: null, isBulk: true }
+}
+const handleBulkAlbum = () => {
+  albumDialog.value = { isOpen: true, item: null, isBulk: true }
 }
 
-const clearSelection = () => selectedIds.value.clear()
-
-// --- ACTIONS ---
-
-const handleMenuAction = (action, item) => {
-  menuVisible.value = false
-  const targetItem = item || activeItem.value
-
-  if (action === 'open') {
-    emit('open-viewer', targetItem)
+const handleLock = async (ids) => {
+  if (!authStore.isVaultUnlocked) {
+    notify.show('Сейф закрыт! Введите PIN код.', 'error')
     return
   }
 
-  if (action === 'select') {
-    selectedIds.value.add(targetItem.id)
-    return
+  try {
+    await api.encryptMedia(ids)
+    notify.show(`Файлов перемещено: ${ids.length}`, 'success')
+    emit('refresh')
+    exitSelectionMode()
+  } catch (e) {
+    notify.show('Ошибка доступа к сейфу', 'error')
   }
+}
 
-  // Определяем список ID для операции
+const handleUnlock = async (ids) => {
+  try {
+    await api.decryptMedia(ids)
+    notify.show(`Файлов восстановлено: ${ids.length}`, 'success')
+    emit('refresh')
+    exitSelectionMode()
+  } catch (e) {
+    notify.show('Ошибка восстановления', 'error')
+  }
+}
+
+const confirmDelete = async () => {
   let ids = []
-  // Если мультивыбор активен И целевой элемент входит в выборку -> применяем ко всем
-  if (selectedIds.value.has(targetItem.id)) {
-    ids = Array.from(selectedIds.value)
-  } else {
-    // Иначе применяем только к этому элементу
-    ids = [targetItem.id]
+  if (deleteDialog.value.isBulk) {
+    ids = Array.from(selectedItems.value)
+  } else if (deleteDialog.value.item) {
+    ids = [deleteDialog.value.item.id]
   }
 
-  if (ids.length === 0) return
-
-  // Сохраняем IDs для модалок
-  // Используем временный объект, чтобы не мутировать реальный item
-  activeItem.value = { ...targetItem, _targetIds: ids } 
-
-  if (action === 'add-to-album') showAlbumSelector.value = true
-  else if (action === 'encrypt') {
-    if (!authStore.isVaultUnlocked) { notify.show('Сначала разблокируйте Сейф!', 'warning'); return }
-    confirmAction.value = 'encrypt'; showConfirm.value = true
-  } 
-  else if (action === 'decrypt') { confirmAction.value = 'decrypt'; showConfirm.value = true }
-  else if (action === 'delete') { confirmAction.value = 'delete'; showConfirm.value = true }
-}
-
-const executeConfirm = async () => {
-  showConfirm.value = false
-  const ids = activeItem.value._targetIds || [activeItem.value.id]
+  if (ids.length === 0) {
+    deleteDialog.value.isOpen = false
+    return
+  }
+  
   try {
-    let res;
-    if (confirmAction.value === 'encrypt') res = await api.encryptMedia(ids)
-    else if (confirmAction.value === 'decrypt') res = await api.decryptMedia(ids)
-    else if (confirmAction.value === 'delete') res = await api.deleteMedia(ids)
-    
-    notify.show('Операция выполнена успешно', 'success')
-    // Очищаем выделение только если удалили или скрыли файлы
-    if (confirmAction.value !== 'decrypt') clearSelection() 
+    await api.deleteMedia(ids)
+    notify.show('Файлы удалены', 'success')
     emit('refresh')
-  } catch (e) { notify.show('Ошибка операции', 'error') }
+    exitSelectionMode()
+  } catch (e) {
+    notify.show('Ошибка удаления', 'error')
+  } finally {
+    deleteDialog.value.isOpen = false
+  }
 }
 
-const handleAlbumSelect = async (album) => {
-  const ids = activeItem.value._targetIds || [activeItem.value.id]
+const handleAddToAlbum = async (albumId) => {
+  let ids = []
+  if (albumDialog.value.isBulk) {
+    ids = Array.from(selectedItems.value)
+  } else if (albumDialog.value.item) {
+    ids = [albumDialog.value.item.id]
+  }
+
+  if (ids.length === 0) {
+    albumDialog.value.isOpen = false
+    return
+  }
+
   try {
-    await api.setAlbum(ids, album.id)
-    notify.show('Альбом обновлен', 'success')
-    clearSelection()
+    await api.setAlbum(ids, albumId)
+    notify.show('Альбом изменен', 'success')
     emit('refresh')
-  } catch (e) { notify.show('Ошибка', 'error') }
+    exitSelectionMode()
+  } catch (e) {
+    notify.show('Ошибка перемещения', 'error')
+  } finally {
+    albumDialog.value.isOpen = false
+  }
 }
 
-const getMediaSource = (item) => {
-  return `/api/media/${item.id}/thumbnail`
-}
-
-const dialogMessage = () => {
-  const count = activeItem.value?._targetIds?.length || 1
-  return `Выбрано объектов: ${count}. Вы уверены?`
-}
+const gridStyle = computed(() => {
+  const cols = (10 - props.columns) 
+  return {
+    gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`
+  }
+})
 </script>
 
 <template>
   <div v-if="items.length === 0" class="flex flex-col items-center justify-center h-64 text-white/30">
-    <p class="text-lg">Нет файлов</p>
+    <p>Нет медиафайлов</p>
   </div>
 
-  <div v-else class="relative min-h-[50vh] pb-32">
-    <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 select-none">
+  <div 
+    v-else 
+    class="grid gap-4 transition-all duration-500 ease-in-out w-full pb-32"
+    :style="gridStyle"
+  >
+    <div 
+      v-for="item in items" 
+      :key="item.id"
+      class="group aspect-square relative bg-white/5 rounded-2xl overflow-hidden cursor-pointer border hover:border-white/20 transition-all duration-200"
+      :class="selectedItems.has(item.id) ? 'border-blue-500 ring-2 ring-blue-500/50 scale-95' : 'hover:shadow-xl hover:scale-[1.02]'"
+      @click="handleClick(item)"
+      @contextmenu="handleContextMenu($event, item)"
+    >
+      <img 
+        :src="getThumbnailUrl(item)" 
+        class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110 opacity-90 group-hover:opacity-100"
+        loading="lazy"
+        @error="$event.target.src = '/assets/placeholder.png'"
+      />
       
-      <div 
-        v-for="item in items" 
-        :key="item.id" 
-        @click="handleLeftClick($event, item)"
-        @contextmenu="handleRightClick($event, item)"
-        class="group relative aspect-square bg-[#0f1016] rounded-2xl overflow-hidden cursor-pointer shadow-lg border border-white/5"
-      >
-        <!-- THUMBNAIL -->
-        <img 
-          :src="getMediaSource(item)" 
-          class="w-full h-full object-cover transition-transform duration-700"
-          :class="{ 'opacity-60': isSelected(item.id) }"
-          loading="lazy"
-        />
-        
-        <!-- VIDEO ICON -->
-        <div v-if="isVideo(item)" class="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div class="bg-black/30 backdrop-blur-md rounded-full p-2 border border-white/10 group-hover:scale-110 transition-transform">
-            <PlayCircleIcon class="w-8 h-8 text-white/90" />
+      <div class="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-transparent opacity-60 group-hover:opacity-40 transition-opacity"></div>
+
+      <div v-if="isSelectionMode" class="absolute top-3 right-3 z-30">
+        <div 
+          class="w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors bg-black/40 backdrop-blur-md"
+          :class="selectedItems.has(item.id) ? 'bg-blue-500 border-blue-500' : 'border-white/50'"
+        >
+          <CheckCircleIcon v-if="selectedItems.has(item.id)" class="w-4 h-4 text-white" />
+        </div>
+      </div>
+
+      <template v-else>
+        <div class="absolute top-2 left-2 flex flex-col gap-1.5 items-start max-w-[70%] z-20">
+          <div v-if="item.is_encrypted" class="w-6 h-6 bg-red-500/80 backdrop-blur-md rounded-lg flex items-center justify-center shadow-lg border border-white/10">
+            <LockClosedIcon class="w-3.5 h-3.5 text-white" />
+          </div>
+          <div v-if="item.album" class="flex items-center gap-1 px-2 py-1 bg-blue-600/80 backdrop-blur-md rounded-lg border border-white/10 shadow-lg">
+            <FolderIcon class="w-3 h-3 text-white/80" />
+            <span class="text-[10px] font-bold text-white truncate max-w-[80px]">{{ item.album.name }}</span>
           </div>
         </div>
 
-        <!-- SELECTION OVERLAY (Inner Border & Icon) -->
-        <div v-if="isSelected(item.id)" class="absolute inset-0 z-20 pointer-events-none rounded-2xl border-[3px] border-hub-accent flex items-center justify-center bg-hub-accent/10">
-          <CheckCircleSolid class="w-10 h-10 text-hub-accent bg-white rounded-full shadow-lg" />
+        <div class="absolute top-2 right-2 flex flex-col gap-1.5 items-end z-20">
+          <div v-if="item.media_type.startsWith('video')" class="w-8 h-8 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border border-white/20 shadow-lg">
+            <PlayIcon class="w-4 h-4 text-white fill-current" />
+          </div>
+          <div class="px-1.5 py-0.5 bg-black/40 backdrop-blur-md rounded text-[9px] font-bold text-white/70 uppercase tracking-wider border border-white/5">
+            {{ getFileExtension(item.filename) }}
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <Teleport to="body">
+    <div v-if="isSelectionMode" class="fixed bottom-8 left-1/2 -translate-x-1/2 z-[9999] flex flex-col items-center animate-slide-up">
+      <div class="bg-[#1e293b]/90 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl p-2 px-4 flex items-center gap-4">
+        
+        <div class="text-white font-bold text-sm border-r border-white/10 pr-4 mr-2">
+          {{ selectedItems.size }} выбрано
         </div>
 
-        <!-- BADGES (Always Visible) -->
-        <div class="absolute bottom-0 left-0 right-0 p-3 flex justify-between items-end bg-gradient-to-t from-black/90 to-transparent pointer-events-none">
-           <!-- Album -->
-           <div v-if="item.album" class="glass-badge truncate max-w-[60%] text-[10px] font-bold text-white px-2 py-1 rounded-lg">
-             {{ item.album.name }}
-           </div>
-           <div v-else></div>
+        <button @click="handleBulkLock" class="action-btn text-white hover:bg-white/10 group" title="В сейф">
+          <LockClosedIcon class="w-5 h-5 text-red-400 group-hover:scale-110 transition-transform" />
+          <span class="text-sm font-medium">В сейф</span>
+        </button>
 
-           <!-- Ext -->
-           <div class="glass-badge text-[9px] font-black uppercase text-white/80 tracking-wider px-1.5 py-0.5 rounded">
-             {{ getFileExtension(item.filename) }}
-           </div>
-        </div>
+        <button @click="handleBulkAlbum" class="action-btn text-white hover:bg-white/10 group" title="В альбом">
+          <FolderIcon class="w-5 h-5 text-blue-400 group-hover:scale-110 transition-transform" />
+          <span class="text-sm font-medium">В альбом</span>
+        </button>
 
-        <!-- Encrypted Lock -->
-        <div v-if="item.is_encrypted" class="absolute top-2 right-2 bg-black/50 backdrop-blur-sm p-1 rounded-full text-green-400 border border-white/10">
-          <LockClosedIcon class="w-3 h-3" />
-        </div>
+        <button @click="handleBulkDelete" class="action-btn text-white hover:bg-white/10 group" title="Удалить">
+          <TrashIcon class="w-5 h-5 text-white/70 group-hover:text-red-500 group-hover:scale-110 transition-transform" />
+          <span class="text-sm font-medium group-hover:text-red-400">Удалить</span>
+        </button>
 
+        <div class="w-px h-6 bg-white/10 mx-2"></div>
+
+        <button @click="exitSelectionMode" class="p-2 hover:bg-white/10 rounded-xl text-white transition-colors">
+          <XMarkIcon class="w-5 h-5" />
+        </button>
       </div>
     </div>
+  </Teleport>
 
-    <!-- FLOATING ACTION BAR (Only when selection > 0) -->
-    <Transition name="slide-up">
-      <div v-if="isSelectionMode" class="fixed bottom-8 left-1/2 -translate-x-1/2 z-40 glass-panel rounded-2xl px-6 py-3 flex items-center gap-6 shadow-2xl border border-white/10">
-        
-        <div class="flex items-center gap-3 border-r border-white/10 pr-6">
-          <div class="bg-hub-accent text-white font-bold rounded-lg px-2 py-0.5 text-sm">
-            {{ selectedIds.size }}
-          </div>
-          <span class="text-sm text-gray-300">выбрано</span>
-          <button @click="clearSelection" class="p-1 hover:bg-white/10 rounded-full transition-colors text-gray-400 hover:text-white">
-            <XMarkIcon class="w-5 h-5" />
-          </button>
-        </div>
+  <Teleport to="body">
+    <ContextMenu 
+      v-if="contextMenu.isOpen"
+      :x="contextMenu.x" :y="contextMenu.y" :item="contextMenu.item"
+      @close="contextMenu.isOpen = false"
+      @action="handleAction"
+    />
 
-        <div class="flex items-center gap-2">
-          <!-- Actions -->
-          <button @click="handleMenuAction('encrypt')" class="action-btn text-blue-400 hover:bg-blue-500/10">
-            <LockClosedIcon class="w-5 h-5" />
-            <span class="hidden sm:inline text-sm font-medium">В сейф</span>
-          </button>
+    <ConfirmDialog 
+      :isOpen="deleteDialog.isOpen"
+      :title="deleteDialog.isBulk ? `Удалить ${selectedItems.size} файлов?` : 'Удалить файл?'"
+      message="Это действие нельзя отменить."
+      @close="deleteDialog.isOpen = false"
+      @confirm="confirmDelete"
+    />
 
-          <button @click="handleMenuAction('add-to-album')" class="action-btn text-gray-300 hover:bg-white/10">
-            <FolderPlusIcon class="w-5 h-5" />
-            <span class="hidden sm:inline text-sm font-medium">В альбом</span>
-          </button>
-
-          <div class="w-px h-6 bg-white/10 mx-2"></div>
-
-          <button @click="handleMenuAction('delete')" class="action-btn text-red-400 hover:bg-red-500/10">
-            <TrashIcon class="w-5 h-5" />
-            <span class="hidden sm:inline text-sm font-medium">Удалить</span>
-          </button>
-        </div>
-      </div>
-    </Transition>
-
-    <!-- GLOBAL COMPONENTS (Teleported) -->
-    <Teleport to="body">
-      <ContextMenu 
-        :visible="menuVisible" 
-        :x="menuX" 
-        :y="menuY" 
-        :item="activeItem" 
-        :selectedCount="selectedIds.size" 
-        @close="menuVisible = false" 
-        @action="handleMenuAction" 
-      />
-      <ConfirmDialog 
-        :isOpen="showConfirm" 
-        title="Подтверждение действия" 
-        :message="dialogMessage()" 
-        :isDestructive="confirmAction === 'delete'" 
-        @confirm="executeConfirm" 
-        @cancel="showConfirm = false" 
-      />
-      <AlbumSelectorModal 
-        :isOpen="showAlbumSelector" 
-        :mediaItem="activeItem" 
-        @close="showAlbumSelector = false" 
-        @select="handleAlbumSelect" 
-      />
-    </Teleport>
-  </div>
+    <AlbumSelectorModal 
+      :isOpen="albumDialog.isOpen"
+      @close="albumDialog.isOpen = false"
+      @select="handleAddToAlbum"
+    />
+  </Teleport>
 </template>
 
 <style scoped>
-.glass-badge {
-  @apply bg-white/10 backdrop-blur-md border border-white/10 shadow-sm;
-}
 .action-btn {
   @apply flex items-center gap-2 px-3 py-2 rounded-xl transition-all active:scale-95;
 }
-.slide-up-enter-active, .slide-up-leave-active {
-  transition: all 0.4s cubic-bezier(0.19, 1, 0.22, 1);
+
+.animate-slide-up {
+  animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
-.slide-up-enter-from, .slide-up-leave-to {
-  transform: translate(-50%, 150%);
-  opacity: 0;
+@keyframes slideUp {
+  from { transform: translate(-50%, 100%); opacity: 0; }
+  to { transform: translate(-50%, 0); opacity: 1; }
 }
 </style>
