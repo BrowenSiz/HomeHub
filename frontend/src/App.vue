@@ -181,10 +181,16 @@ onUnmounted(() => { if (heartbeatInterval) clearInterval(heartbeatInterval) })
 </script>
 
 <template>
-  <div class="h-screen w-full flex flex-col overflow-hidden bg-[#0f172a] selection:bg-blue-500 selection:text-white font-sans">
+  <div class="h-screen w-full flex flex-col overflow-hidden bg-[#0f172a] selection:bg-blue-500 selection:text-white font-sans relative">
     
+    <div class="absolute inset-0 overflow-hidden pointer-events-none z-0">
+      <div class="absolute top-[-20%] left-[-10%] w-[60%] h-[60%] bg-blue-600/10 rounded-full blur-[150px] animate-blob"></div>
+      <div class="absolute bottom-[-20%] right-[-10%] w-[60%] h-[60%] bg-purple-600/10 rounded-full blur-[150px] animate-blob animation-delay-2000"></div>
+      <div class="absolute top-[40%] left-[40%] w-[40%] h-[40%] bg-indigo-500/5 rounded-full blur-[150px] animate-blob animation-delay-4000"></div>
+    </div>
+
     <div 
-      class="flex-1 flex p-5 gap-5 overflow-hidden relative"
+      class="flex-1 flex p-5 gap-5 overflow-hidden relative z-10"
       @dragenter="uploadStore.onDragEnter" 
       @dragleave="uploadStore.onDragLeave" 
       @dragover.prevent 
@@ -193,9 +199,6 @@ onUnmounted(() => { if (heartbeatInterval) clearInterval(heartbeatInterval) })
       <DragDropZone :targetName="dragTargetName" />
       <UploadProgress />
       <ToastContainer />
-
-      <div class="fixed top-[-20%] left-[-10%] w-[50%] h-[50%] bg-blue-600/10 rounded-full blur-[120px] pointer-events-none"></div>
-      <div class="fixed bottom-[-20%] right-[-10%] w-[50%] h-[50%] bg-purple-600/10 rounded-full blur-[120px] pointer-events-none"></div>
 
       <input type="file" ref="fileInputRef" class="hidden" multiple accept="image/*,video/*,.cr2,.nef,.dng" @change="onFileChange" />
       <CreateAlbumModal :isOpen="isCreateAlbumOpen" @close="isCreateAlbumOpen = false" @create="handleCreateAlbum" />
@@ -281,4 +284,20 @@ onUnmounted(() => { if (heartbeatInterval) clearInterval(heartbeatInterval) })
 .custom-scrollbar::-webkit-scrollbar { width: 6px; }
 .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
 .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+
+@keyframes blob {
+  0% { transform: translate(0px, 0px) scale(1); }
+  33% { transform: translate(30px, -50px) scale(1.1); }
+  66% { transform: translate(-20px, 20px) scale(0.9); }
+  100% { transform: translate(0px, 0px) scale(1); }
+}
+.animate-blob {
+  animation: blob 10s infinite;
+}
+.animation-delay-2000 {
+  animation-delay: 2s;
+}
+.animation-delay-4000 {
+  animation-delay: 4s;
+}
 </style>

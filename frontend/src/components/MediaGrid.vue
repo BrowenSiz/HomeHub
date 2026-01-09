@@ -24,6 +24,7 @@ const { y: scrollTop } = useScroll(containerRef)
 
 const GAP = 16
 const PADDING_TOP = 40
+const PADDING_X = 48 
 
 const rows = computed(() => {
   const result = []
@@ -34,10 +35,9 @@ const rows = computed(() => {
   return result
 })
 
-// 2. Вычисляем высоту одного ряда
 const rowHeight = computed(() => {
   if (!containerWidth.value) return 200
-  const contentWidth = containerWidth.value - 80 
+  const contentWidth = containerWidth.value - (PADDING_X * 2) 
   const cols = 10 - props.columns
   return (contentWidth - (GAP * (cols - 1))) / cols
 })
@@ -45,7 +45,6 @@ const rowHeight = computed(() => {
 const visibleRowsRange = computed(() => {
   const itemHeight = rowHeight.value + GAP
   const buffer = 4
-  
   const scrollY = Math.max(0, scrollTop.value - PADDING_TOP)
   const startIndex = Math.floor(scrollY / itemHeight)
   const visibleCount = Math.ceil(containerHeight.value / itemHeight)
@@ -67,7 +66,6 @@ const visibleRows = computed(() => {
 const spacerStyle = computed(() => {
   const { start, end } = visibleRowsRange.value
   const itemHeight = rowHeight.value + GAP
-  
   const paddingTop = start * itemHeight
   const paddingBottom = (rows.value.length - end) * itemHeight
   
@@ -183,6 +181,7 @@ const handleLock = async (ids) => {
     notify.show('Сейф закрыт! Введите PIN код.', 'error')
     return
   }
+
   try {
     await api.encryptMedia(ids)
     notify.show(`Перемещено в сейф: ${ids.length}`, 'success')
@@ -262,35 +261,34 @@ const handleAddToAlbum = async (albumId) => {
 <template>
   <div 
     ref="containerRef" 
-    class="h-full w-full overflow-y-auto px-10 py-10 scroll-smooth custom-scrollbar relative pb-40"
+    class="h-full w-full overflow-y-auto px-12 py-8 scroll-smooth custom-scrollbar relative pb-40"
   >
     <div v-if="items.length === 0" class="flex flex-col items-center justify-center h-64 text-white/30">
       <p>Нет медиафайлов</p>
     </div>
 
     <div v-else :style="spacerStyle">
-      
       <div 
         v-for="row in visibleRows" 
-        :key="row.rowIndex"
+        :key="row.rowIndex" 
         :style="rowGridStyle"
       >
         <div 
           v-for="item in row.items" 
           :key="item.id"
-          class="group aspect-square relative bg-white/5 rounded-2xl overflow-hidden cursor-pointer border hover:border-white/20 transition-all duration-200"
-          :class="selectedItems.has(item.id) ? 'border-blue-500 ring-2 ring-blue-500/50 scale-95' : 'border-white/5 hover:shadow-2xl hover:scale-[1.02]'"
+          class="group aspect-square relative bg-white/5 rounded-2xl overflow-hidden cursor-pointer transition-all duration-200 border border-transparent hover:border-white/20 hover:shadow-2xl hover:scale-[1.02]"
+          :class="selectedItems.has(item.id) ? 'ring-4 ring-blue-500/50 scale-95' : ''"
           @click="handleClick(item)"
           @contextmenu="handleContextMenu($event, item)"
         >
           <img 
             :src="getThumbnailUrl(item)" 
-            class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110 opacity-90 group-hover:opacity-100"
+            class="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity"
             loading="lazy"
             @error="$event.target.src = '/assets/placeholder.png'"
           />
           
-          <div class="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-transparent opacity-60 group-hover:opacity-40 transition-opacity"></div>
+          <div class="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
 
           <div v-if="isSelectionMode" class="absolute top-3 right-3 z-30">
             <div 
@@ -302,22 +300,21 @@ const handleAddToAlbum = async (albumId) => {
           </div>
 
           <template v-else>
-            <div class="absolute top-2 left-2 flex flex-col gap-1.5 items-start max-w-[70%] z-20">
-              <div v-if="item.is_encrypted" class="w-6 h-6 bg-red-500/80 backdrop-blur-md rounded-lg flex items-center justify-center shadow-lg border border-white/10">
-                <LockClosedIcon class="w-3.5 h-3.5 text-white" />
+            <div class="absolute top-3 left-3 flex flex-col gap-1.5 items-start max-w-[70%] z-20">
+              <div v-if="item.is_encrypted" class="w-7 h-7 bg-red-500/80 backdrop-blur-md rounded-xl flex items-center justify-center shadow-lg border border-white/10">
+                <LockClosedIcon class="w-4 h-4 text-white" />
               </div>
-              <div v-if="item.album" class="flex items-center gap-1 px-2 py-1 bg-blue-600/80 backdrop-blur-md rounded-lg border border-white/10 shadow-lg">
-                <FolderIcon class="w-3 h-3 text-white/80" />
+              <div v-if="item.album" class="flex items-center gap-1.5 px-2.5 py-1 bg-blue-600/80 backdrop-blur-md rounded-lg border border-white/10 shadow-lg">
+                <FolderIcon class="w-3 h-3 text-white/90" />
                 <span class="text-[10px] font-bold text-white truncate max-w-[80px]">{{ item.album.name }}</span>
               </div>
             </div>
-
-            <!-- Правый верх: Видео и Тип -->
-            <div class="absolute top-2 right-2 flex flex-col gap-1.5 items-end z-20">
+            
+            <div class="absolute top-3 right-3 flex flex-col gap-1.5 items-end z-20">
               <div v-if="item.media_type.startsWith('video')" class="w-8 h-8 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border border-white/20 shadow-lg">
                 <PlayIcon class="w-4 h-4 text-white fill-current" />
               </div>
-              <div class="px-1.5 py-0.5 bg-black/40 backdrop-blur-md rounded text-[9px] font-bold text-white/70 uppercase tracking-wider border border-white/5">
+              <div class="px-2 py-0.5 bg-black/40 backdrop-blur-md rounded-md text-[9px] font-bold text-white/70 uppercase tracking-wider border border-white/5">
                 {{ getFileExtension(item.filename) }}
               </div>
             </div>
@@ -328,38 +325,33 @@ const handleAddToAlbum = async (albumId) => {
   </div>
 
   <Teleport to="body">
-    <div v-if="isSelectionMode" class="fixed bottom-8 left-1/2 -translate-x-1/2 z-[9999] flex flex-col items-center animate-slide-up">
-      <div class="bg-[#1e293b]/90 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl p-2 px-4 flex items-center gap-4">
+    <div v-if="isSelectionMode" class="fixed bottom-10 left-1/2 -translate-x-1/2 z-[9999] flex flex-col items-center animate-slide-up">
+      <div class="bg-[#1e293b]/90 backdrop-blur-xl border border-white/10 rounded-full shadow-2xl p-2 px-6 flex items-center gap-4">
         
-        <div class="text-white font-bold text-sm border-r border-white/10 pr-4 mr-2">
-          {{ selectedItems.size }} выбрано
+        <div class="text-white font-bold text-sm border-r border-white/10 pr-4 mr-1">
+          <span class="text-blue-400 text-lg">{{ selectedItems.size }}</span> <span class="text-white/50 text-xs uppercase tracking-widest">Selected</span>
         </div>
 
-        <button @click="handleBulkLock" class="action-btn text-white hover:bg-white/10 group" title="Переместить в сейф">
+        <button @click="handleBulkLock" class="action-btn text-white hover:bg-white/10 group" title="В сейф">
           <LockClosedIcon class="w-5 h-5 text-red-400 group-hover:scale-110 transition-transform" />
-          <span class="text-xs font-medium text-white/80 group-hover:text-white">В сейф</span>
         </button>
 
-        <button @click="handleBulkAlbum" class="action-btn text-white hover:bg-white/10 group" title="Добавить в альбом">
+        <button @click="handleBulkAlbum" class="action-btn text-white hover:bg-white/10 group" title="В альбом">
           <FolderIcon class="w-5 h-5 text-blue-400 group-hover:scale-110 transition-transform" />
-          <span class="text-xs font-medium text-white/80 group-hover:text-white">В альбом</span>
         </button>
 
-        <button @click="handleBulkDelete" class="action-btn text-white hover:bg-white/10 group" title="Удалить выбранное">
+        <button @click="handleBulkDelete" class="action-btn text-white hover:bg-white/10 group" title="Удалить">
           <TrashIcon class="w-5 h-5 text-white/70 group-hover:text-red-500 group-hover:scale-110 transition-transform" />
-          <span class="text-xs font-medium text-white/80 group-hover:text-white">Удалить</span>
         </button>
 
-        <div class="w-px h-6 bg-white/10 mx-2"></div>
+        <div class="w-px h-6 bg-white/10 mx-1"></div>
 
-        <button @click="exitSelectionMode" class="p-2 hover:bg-white/10 rounded-xl text-white transition-colors" title="Отмена">
+        <button @click="exitSelectionMode" class="p-3 rounded-full hover:bg-white/10 text-white transition-colors" title="Отмена">
           <XMarkIcon class="w-5 h-5" />
         </button>
       </div>
     </div>
-  </Teleport>
-
-  <Teleport to="body">
+    
     <ContextMenu 
       v-if="contextMenu.isOpen"
       :x="contextMenu.x" :y="contextMenu.y" :item="contextMenu.item"
@@ -385,12 +377,13 @@ const handleAddToAlbum = async (albumId) => {
 
 <style scoped>
 .action-btn {
-  @apply flex flex-col items-center gap-1 px-3 py-2 rounded-xl transition-all active:scale-95;
+  @apply p-3 rounded-full transition-all active:scale-95 flex items-center justify-center;
 }
 
 .animate-slide-up {
   animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
+
 @keyframes slideUp {
   from { transform: translate(-50%, 100%); opacity: 0; }
   to { transform: translate(-50%, 0); opacity: 1; }
